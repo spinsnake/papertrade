@@ -31,6 +31,9 @@ class Settings:
     strict_liquidation: bool = True
     risky_artifact_path: Path | None = None
     safe_artifact_path: Path | None = None
+    live_platform_sources: bool = False
+    bybit_rest_base_url: str = "https://api.bybit.com"
+    bitget_rest_base_url: str = "https://api.bitget.com"
     platform_db_path: Path | None = None
     market_state_snapshot_path: Path | None = None
     orderbook_snapshot_path: Path | None = None
@@ -57,6 +60,9 @@ class Settings:
             strict_liquidation=_env("PAPERTRADE_STRICT_LIQUIDATION", "true").lower() in {"1", "true", "yes"},
             risky_artifact_path=_path_or_none(_env("PAPERTRADE_RISKY_ARTIFACT_PATH", "")),
             safe_artifact_path=_path_or_none(_env("PAPERTRADE_SAFE_ARTIFACT_PATH", "")),
+            live_platform_sources=_env("PAPERTRADE_LIVE_PLATFORM_SOURCES", "false").lower() in {"1", "true", "yes"},
+            bybit_rest_base_url=_env("PAPERTRADE_BYBIT_REST_BASE_URL", "https://api.bybit.com"),
+            bitget_rest_base_url=_env("PAPERTRADE_BITGET_REST_BASE_URL", "https://api.bitget.com"),
             platform_db_path=_path_or_none(_env("PAPERTRADE_PLATFORM_DB_PATH", "")),
             market_state_snapshot_path=_path_or_none(_env("PAPERTRADE_MARKET_STATE_SNAPSHOT_PATH", "")),
             orderbook_snapshot_path=_path_or_none(_env("PAPERTRADE_ORDERBOOK_SNAPSHOT_PATH", "")),

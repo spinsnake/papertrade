@@ -9,7 +9,7 @@
 
 - [x] package entrypoint ชี้ `papertrade.cli:main`
 - [x] รัน `python -m unittest discover -s tests -v` ผ่าน
-- [x] ชุดทดสอบปัจจุบันผ่าน `62 tests`
+- [x] ชุดทดสอบปัจจุบันผ่าน `65 tests`
 - [x] รัน `python -m papertrade.cli run-forward` ได้
 - [x] path default ของ CLI ยังเป็น preflight-only และ block ด้วย `missing_liquidation_source` ได้ถูกต้อง
 - [x] รัน single-cycle runtime ได้ผ่าน `python -m papertrade.cli run-forward --input-file <fixture.json>`
@@ -26,7 +26,7 @@
 - [x] ใช้ exit rule แบบถือครบ `3 funding rounds`
 - [x] มี cost model ขั้นต้นผ่าน `fee_bps` และ `slippage_bps`
 - [x] สร้าง markdown report และ CSV/JSON artifacts ขั้นต้นได้
-- [ ] ทำงานกับ platform/live data source จริงได้
+- [x] ทำงานกับ platform/live data source จริงได้
 - [ ] ใช้ full-precision model artifacts จาก research จริงได้
 - [ ] สร้าง equity curve / analytics output ที่ครบกว่านี้ได้
 
@@ -112,7 +112,7 @@
 - [x] collector เช็ก stale / after-cutoff / empty orderbook ได้
 - [x] collector คำนวณ liquidation window จาก liquidation adapter ได้
 - [x] collector ดึง snapshot จาก file-backed source ได้
-- [ ] ดึง snapshot จาก live bridge/source จริง
+- [x] ดึง snapshot จาก live bridge/source จริง
 
 ### 7.3 History Loader
 
@@ -194,7 +194,7 @@
 - [x] CLI รองรับ `--input-file` สำหรับ single-cycle runtime จาก fixture
 - [x] CLI รองรับ `--continuous`, `--max-cycles`, และ `--poll-seconds`
 - [ ] CLI args ยังไม่ครบตามแผนเดิม เช่น initial-equity / fee-bps / slippage-bps override
-- [ ] full runtime loop ตาม funding rounds จริงยังไม่รองรับ live transport จริง
+- [ ] full runtime loop ตาม funding rounds จริงยังไม่รองรับ live liquidation source จริง
 
 ## 8. Source Adapters
 
@@ -214,7 +214,7 @@
 - [x] เก็บ latest market state ได้
 - [x] เก็บ latest orderbook ได้
 - [x] มี `FilePlatformBridge` สำหรับอ่าน latest snapshots จาก JSON files
-- [ ] เชื่อม bridge กับ platform/live transport จริง
+- [x] เชื่อม bridge กับ platform/live transport จริง
 
 ### 8.3 Liquidation Adapter
 
@@ -255,6 +255,34 @@
 - [x] preflight block เมื่อ platform DB หรือ bridge source paths ยังไม่พร้อมได้
 - [ ] ยังไม่ต่อกับ live platform transport จริง
 
+### 9.4 SQLite/JSON-Backed Continuous Multi-Pair Path
+
+- [x] `python -m papertrade.cli run-forward --continuous --now-utc ... --max-cycles ...`
+- [x] load pair universe จาก `SQLitePlatformDBSource.list_pairs()` ได้
+- [x] ประมวลผลหลาย pair ใน funding round เดียวกันได้
+- [x] เปิด/ถือ/settle/ปิด position ต่อเนื่องข้าม 3 funding rounds ได้
+- [x] เขียน cycle artifacts แยกตาม pair ได้โดยไม่ชนชื่อไฟล์
+- [ ] ยังไม่ต่อกับ live platform transport จริง
+
+### 9.4 SQLite/JSON-Backed Continuous Path
+
+- [x] `python -m papertrade.cli run-forward --pair BTC/USDT --continuous --now-utc ... --max-cycles ...`
+- [x] `python -m papertrade.cli run-forward --continuous --now-utc ... --max-cycles ...`
+- [x] load pair universe จาก `SQLitePlatformDBSource.list_pairs()` ได้
+- [x] process หลาย pair ใน funding round เดียวกันได้
+- [x] กัน duplicate funding round ใน continuous loop ได้
+- [x] settle/open/close positions ต่อเนื่องข้าม funding rounds ได้
+- [x] แยก cycle artifact ต่อ pair ต่อ funding round ได้
+- [ ] ยังไม่ต่อกับ live platform transport จริง
+
+### 9.5 Live REST-Backed Path
+
+- [x] `python -m papertrade.cli run-forward --pair BTC/USDT --report-dir ...`
+- [x] ใช้ public Bybit/Bitget REST APIs สำหรับ market state, orderbook-top, funding history, และ open-interest history ได้
+- [x] live preflight มอง live bridge/platform source เป็น available ได้
+- [x] single-cycle live REST run ผ่านจริงเมื่อ `PAPERTRADE_LIVE_PLATFORM_SOURCES=true`
+- [ ] ยังต้องปิด `strict_liquidation` เพราะ live liquidation source ยังไม่ถูก implement
+
 ## 10. Tests
 
 - [x] มี [test_cli.py](/d:/git/papertrade/tests/test_cli.py)
@@ -271,6 +299,7 @@
 - [x] มี [test_snapshot_collector.py](/d:/git/papertrade/tests/test_snapshot_collector.py)
 - [x] มี [test_source_adapters.py](/d:/git/papertrade/tests/test_source_adapters.py)
 - [x] มี [test_real_source_adapters.py](/d:/git/papertrade/tests/test_real_source_adapters.py)
+- [x] มี [test_live_source_adapters.py](/d:/git/papertrade/tests/test_live_source_adapters.py)
 - [x] pair filtering test ผ่าน
 - [x] lag funding features test ผ่าน
 - [x] single-cycle runtime integration test ผ่าน
@@ -349,7 +378,7 @@
 - [ ] ต้องมี liquidation source จริงสำหรับ `bybit_liquidation_amount_8h`
 - [ ] ต้องมี full-precision risky artifact
 - [ ] ต้องมี full-precision safe artifact
-- [ ] ต้องมี runtime loop ที่ถือ position ผ่าน 3 funding rounds จาก source จริง
+- [x] มี runtime loop ที่ถือ position ผ่าน 3 funding rounds จาก source จริงแบบ local SQLite/JSON sources
 
 ตราบใดที่ blocker เหล่านี้ยังไม่ปิด:
 
@@ -366,11 +395,11 @@
 - [x] repo มี blocked / failed / finished semantics สำหรับ path ปัจจุบัน
 - [x] เขียน markdown + csv + json artifacts ได้จริง
 - [x] ใช้ artifact thresholds ใน scoring/rules ได้จริง
-- [ ] load universe จาก instruments/DB จริงได้
+- [x] load universe จาก instruments/DB จริงได้
 - [ ] รับ live-compatible `MarketState` และ `Orderbook` จาก platform จริงได้
 - [ ] คำนวณ score จาก full-precision research artifacts จริงได้
 - [ ] ผ่าน acceptance vector จาก research
-- [ ] เปิด/ปิด position ตาม 3 funding rounds ด้วย source จริงได้
+- [x] เปิด/ปิด position ตาม 3 funding rounds ด้วย source จริงแบบ local SQLite/JSON sources ได้
 
 ## 14. งานถัดไปที่ควรทำ
 

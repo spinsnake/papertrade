@@ -11,13 +11,15 @@ Current scope:
 - report and persistence pipeline
 - in-memory adapters
 - SQLite/JSON-backed source adapters
+- live Bybit/Bitget REST source adapters
 - single-cycle CLI runtime
 - continuous multi-cycle CLI runtime
 - multi-pair continuous loop from SQLite pair universe
+- single-pair live REST runtime
 - test suite
 
 Not implemented yet:
-- live transport integration
+- live liquidation integration
 - full-precision research artifacts
 - research acceptance tests
 
@@ -87,7 +89,17 @@ $env:PAPERTRADE_LIQUIDATION_EVENTS_PATH="data\\liquidations.json"
 python -m papertrade.cli run-forward --continuous --now-utc 2025-01-11T07:59:00+00:00 --max-cycles 3 --poll-seconds 0 --report-dir reports
 ```
 
-Expected real-source files:
+Live REST-backed single cycle:
+
+```powershell
+$env:PAPERTRADE_RISKY_ARTIFACT_PATH="artifacts\\risky.json"
+$env:PAPERTRADE_SAFE_ARTIFACT_PATH="artifacts\\safe.json"
+$env:PAPERTRADE_LIVE_PLATFORM_SOURCES="true"
+$env:PAPERTRADE_STRICT_LIQUIDATION="false"
+python -m papertrade.cli run-forward --pair BTC/USDT --report-dir reports
+```
+
+Expected local-source files:
 - `platform.sqlite3`
   - tables: `instruments`, `funding`, `open_interest`
 - `market_states.json`
@@ -96,6 +108,11 @@ Expected real-source files:
   - JSON array of orderbook records with `exchange`, `base`, `quote`, `bids`, `asks`, `updated_at`
 - `liquidations.json`
   - JSON array of liquidation events with `base`, `quote`, `time`, `usd_size`
+
+Live REST source notes:
+- market state and orderbook are fetched from public Bybit/Bitget REST endpoints at runtime
+- funding and open-interest history are fetched from public Bybit/Bitget REST endpoints at runtime
+- live liquidation is not implemented yet, so `PAPERTRADE_STRICT_LIQUIDATION=false` is required for live REST runs today
 
 ## Docker
 

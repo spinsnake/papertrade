@@ -8,7 +8,7 @@ from typing import Callable, Sequence
 from .config import Settings
 from .contracts import Pair, PaperRun
 from .portfolio import PortfolioSimulator
-from .sources.platform_db import SQLitePlatformDBSource
+from .sources.platform_db import LivePlatformDBSource, SQLitePlatformDBSource
 from .single_cycle_runtime import (
     PreparedCycleRuntime,
     SingleCycleExecutionResult,
@@ -190,9 +190,16 @@ def _load_real_source_bundles(
         )
 
     if settings.platform_db_path is None:
-        raise ValueError("platform_db_path must be configured")
+        if not settings.live_platform_sources:
+            raise ValueError("platform_db_path must be configured")
 
-    platform_db_source = SQLitePlatformDBSource(settings.platform_db_path)
+    if settings.live_platform_sources:
+        platform_db_source = LivePlatformDBSource(
+            bybit_base_url=settings.bybit_rest_base_url,
+            bitget_base_url=settings.bitget_rest_base_url,
+        )
+    else:
+        platform_db_source = SQLitePlatformDBSource(settings.platform_db_path)
     pairs = tuple(platform_db_source.list_pairs())
     if not pairs:
         raise ValueError("no eligible pairs found in platform_db_source")

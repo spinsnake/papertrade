@@ -18,10 +18,14 @@ def has_liquidation_source(settings: Settings) -> bool:
 
 
 def has_platform_db_source(settings: Settings) -> bool:
+    if settings.live_platform_sources:
+        return True
     return settings.platform_db_path is not None and settings.platform_db_path.is_file()
 
 
 def has_platform_bridge_source(settings: Settings) -> bool:
+    if settings.live_platform_sources:
+        return True
     return (
         settings.market_state_snapshot_path is not None
         and settings.market_state_snapshot_path.is_file()

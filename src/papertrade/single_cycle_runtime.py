@@ -27,8 +27,8 @@ from .sources.liquidation import (
     LiquidationEvent,
     LiquidationSource,
 )
-from .sources.platform_bridge import FilePlatformBridge, InMemoryPlatformBridge, PlatformBridgeSource
-from .sources.platform_db import InMemoryPlatformDBSource, PlatformDBSource, SQLitePlatformDBSource
+from .sources.platform_bridge import FilePlatformBridge, InMemoryPlatformBridge, LiveHttpPlatformBridge, PlatformBridgeSource
+from .sources.platform_db import InMemoryPlatformDBSource, LivePlatformDBSource, PlatformDBSource, SQLitePlatformDBSource
 
 
 def _decimal(value: object, *, default: str | None = None) -> Decimal:
@@ -179,17 +179,29 @@ def load_configured_single_cycle_sources(
     pair: Pair,
     now_utc: datetime | None = None,
 ) -> SingleCycleSourceBundle:
-    if settings.platform_db_path is None:
-        raise ValueError("platform_db_path must be configured")
-    if settings.market_state_snapshot_path is None:
-        raise ValueError("market_state_snapshot_path must be configured")
-    if settings.orderbook_snapshot_path is None:
-        raise ValueError("orderbook_snapshot_path must be configured")
+    if settings.live_platform_sources:
+        bridge = LiveHttpPlatformBridge(
+            bybit_base_url=settings.bybit_rest_base_url,
+            bitget_base_url=settings.bitget_rest_base_url,
+        )
+        platform_db_source: PlatformDBSource = LivePlatformDBSource(
+            bybit_base_url=settings.bybit_rest_base_url,
+            bitget_base_url=settings.bitget_rest_base_url,
+        )
+    else:
+        if settings.platform_db_path is None:
+            raise ValueError("platform_db_path must be configured")
+        if settings.market_state_snapshot_path is None:
+            raise ValueError("market_state_snapshot_path must be configured")
+        if settings.orderbook_snapshot_path is None:
+            raise ValueError("orderbook_snapshot_path must be configured")
 
-    bridge = FilePlatformBridge(
-        market_state_path=settings.market_state_snapshot_path,
-        orderbook_path=settings.orderbook_snapshot_path,
-    )
+        bridge = FilePlatformBridge(
+            market_state_path=settings.market_state_snapshot_path,
+            orderbook_path=settings.orderbook_snapshot_path,
+        )
+        platform_db_source = SQLitePlatformDBSource(settings.platform_db_path)
+
     liquidation_source = None
     liquidation_source_configured = False
     if settings.liquidation_events_path is not None and settings.liquidation_events_path.is_file():
@@ -200,7 +212,7 @@ def load_configured_single_cycle_sources(
         now_utc=ensure_utc(now_utc or datetime.now(timezone.utc)),
         pair=pair,
         bridge=bridge,
-        platform_db_source=SQLitePlatformDBSource(settings.platform_db_path),
+        platform_db_source=platform_db_source,
         liquidation_source=liquidation_source,
         liquidation_source_configured=liquidation_source_configured,
     )
