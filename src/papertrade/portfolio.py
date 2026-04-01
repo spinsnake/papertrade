@@ -15,6 +15,20 @@ class PortfolioSimulator:
     positions: dict[str, PaperPosition] = field(default_factory=dict)
     trades: list[PaperTrade] = field(default_factory=list)
 
+    @classmethod
+    def from_state(
+        cls,
+        *,
+        run: PaperRun,
+        positions: list[PaperPosition],
+        trades: list[PaperTrade],
+    ) -> "PortfolioSimulator":
+        return cls(
+            run=run,
+            positions={position.position_id: position for position in positions},
+            trades=list(trades),
+        )
+
     def has_open_position(self, pair: Pair) -> bool:
         return any(position.pair == pair and position.state is PositionState.OPEN for position in self.positions.values())
 
@@ -24,11 +38,17 @@ class PortfolioSimulator:
         decision: EntryDecision,
         entry_time: datetime,
         planned_exit_round: datetime,
+        entry_slippage_bps: Decimal | None = None,
     ) -> PaperPosition:
         if not decision.selected or decision.short_exchange is None or decision.long_exchange is None:
             raise ValueError("decision must be selected before opening a position")
         if planned_exit_round <= decision.funding_round:
             raise ValueError("planned_exit_round must be after entry_round")
+        if any(
+            position.pair == decision.pair and position.entry_round == decision.funding_round
+            for position in self.positions.values()
+        ):
+            raise ValueError("position for pair and entry_round already exists")
 
         position = PaperPosition(
             position_id=str(uuid4()),
@@ -48,6 +68,7 @@ class PortfolioSimulator:
             entry_signed_spread_bps=decision.signed_spread_bps or Decimal("0"),
             entry_reason_code="selected",
             notional=self.run.current_equity * self.run.notional_pct,
+            slippage_bps=entry_slippage_bps,
             equity_before=self.run.current_equity,
         )
         self.positions[position.position_id] = position
@@ -60,6 +81,7 @@ class PortfolioSimulator:
         funding_round: datetime,
         bybit_funding_rate_bps: Decimal | None,
         bitget_funding_rate_bps: Decimal | None,
+        exit_slippage_bps: Decimal | None = None,
     ) -> PaperPosition:
         position = self.positions[position_id]
         if position.state is not PositionState.OPEN:
@@ -102,13 +124,30 @@ class PortfolioSimulator:
         )
         position.rounds_collected += 1
         if position.rounds_collected == 3:
-            self._close_completed(position, funding_round)
+            self._close_completed(position, funding_round, exit_slippage_bps=exit_slippage_bps)
         return position
 
-    def _close_completed(self, position: PaperPosition, funding_round: datetime) -> None:
+    def _close_completed(
+        self,
+        position: PaperPosition,
+        funding_round: datetime,
+        *,
+        exit_slippage_bps: Decimal | None,
+    ) -> None:
         gross_bps = sum((round_.realized_round_gross_bps or Decimal("0")) for round_ in position.rounds)
-        fee_bps = self.run.fee_bps
-        slippage_bps = self.run.slippage_bps
+        bybit_fee_bps = self.run.bybit_taker_fee_bps * Decimal("2")
+        bitget_fee_bps = self.run.bitget_taker_fee_bps * Decimal("2")
+        fee_bps = bybit_fee_bps + bitget_fee_bps
+        entry_slippage_bps = position.slippage_bps
+        fallback_phase_slippage_bps = self.run.slippage_bps / Decimal("2")
+        if entry_slippage_bps is None and exit_slippage_bps is None:
+            slippage_bps = self.run.slippage_bps
+        elif entry_slippage_bps is None:
+            slippage_bps = fallback_phase_slippage_bps + (exit_slippage_bps or Decimal("0"))
+        elif exit_slippage_bps is None:
+            slippage_bps = entry_slippage_bps + fallback_phase_slippage_bps
+        else:
+            slippage_bps = entry_slippage_bps + exit_slippage_bps
         net_bps = gross_bps - fee_bps - slippage_bps
         gross_pnl = position.notional * gross_bps / Decimal("10000")
         fee_pnl = -(position.notional * fee_bps / Decimal("10000"))

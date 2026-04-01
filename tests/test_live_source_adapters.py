@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from papertrade.config import Settings
 from papertrade.contracts import Pair
@@ -10,7 +13,8 @@ from papertrade.runtime import resolve_runtime_availability
 from papertrade.single_cycle_runtime import load_configured_single_cycle_sources
 from papertrade.sources.liquidation import BybitLiveLiquidationSource
 from papertrade.sources.platform_bridge import LiveHttpPlatformBridge
-from papertrade.sources.platform_db import LivePlatformDBSource
+from papertrade.sources.platform_db import LivePlatformDBSource, SQLitePlatformDBSource
+from papertrade.sources.platform_snapshots import SQLiteFundingRoundSnapshotSource
 
 
 class FakeHttpClient:
@@ -260,3 +264,41 @@ class LiveSourceAdapterTests(unittest.TestCase):
         self.assertIsInstance(source_bundle.platform_db_source, LivePlatformDBSource)
         self.assertIsInstance(source_bundle.liquidation_source, BybitLiveLiquidationSource)
         self.assertTrue(source_bundle.has_liquidation_source)
+
+    def test_live_settings_with_sqlite_path_use_standalone_sqlite_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings = Settings(
+                live_platform_sources=True,
+                live_liquidation_source=True,
+                bybit_rest_base_url="https://api.bybit.com",
+                bitget_rest_base_url="https://api.bitget.com",
+                platform_db_path=Path(tmpdir) / "papertrade.sqlite3",
+            )
+
+            with patch(
+                "papertrade.sources.platform_db.ExchangeRestPlatformDBSource.get_instrument",
+                side_effect=[
+                    None,
+                    None,
+                ],
+            ), patch(
+                "papertrade.sources.platform_db.ExchangeRestPlatformDBSource.load_funding_history",
+                return_value=(),
+            ), patch(
+                "papertrade.sources.platform_db.ExchangeRestPlatformDBSource.load_open_interest_history",
+                return_value=(),
+            ):
+                availability = resolve_runtime_availability(settings)
+                source_bundle = load_configured_single_cycle_sources(
+                    settings,
+                    pair=Pair("BTC", "USDT"),
+                    now_utc=datetime(2025, 1, 11, 7, 59, tzinfo=timezone.utc),
+                )
+
+        self.assertTrue(availability.has_platform_db_source)
+        self.assertTrue(availability.has_platform_snapshot_source)
+        self.assertEqual(availability.platform_source_kind, "standalone_sqlite_live")
+        self.assertIsInstance(source_bundle.bridge, LiveHttpPlatformBridge)
+        self.assertIsInstance(source_bundle.platform_db_source, SQLitePlatformDBSource)
+        self.assertIsInstance(source_bundle.snapshot_store, SQLiteFundingRoundSnapshotSource)
+        self.assertIsInstance(source_bundle.liquidation_source, BybitLiveLiquidationSource)

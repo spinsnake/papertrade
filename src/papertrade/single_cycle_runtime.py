@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from .config import Settings
-from .contracts import Funding, Level, MarketState, OpenInterest, Orderbook, Pair, PaperRun
+from .contracts import Funding, FundingRoundSnapshot, Level, MarketState, OpenInterest, Orderbook, Pair, PaperRun
 from .orchestrator import (
     SingleCycleInput,
     SingleCycleResult,
@@ -20,6 +20,7 @@ from .portfolio import PortfolioSimulator
 from .report import MarkdownReportWriter, format_as_of_round
 from .scheduler import FundingDecision, RoundScheduler, ensure_utc
 from .scoring import LogisticArtifact, load_artifact_pair
+from .slippage import estimate_entry_slippage_bps, estimate_exit_slippage_bps
 from .snapshot_collector import SnapshotCollector
 from .sources.liquidation import (
     BybitLiveLiquidationSource,
@@ -28,8 +29,20 @@ from .sources.liquidation import (
     LiquidationEvent,
     LiquidationSource,
 )
-from .sources.platform_bridge import FilePlatformBridge, InMemoryPlatformBridge, LiveHttpPlatformBridge, PlatformBridgeSource
-from .sources.platform_db import InMemoryPlatformDBSource, LivePlatformDBSource, PlatformDBSource, SQLitePlatformDBSource
+from .sources.platform_bridge import ExchangeRestPlatformBridge, FilePlatformBridge, InMemoryPlatformBridge, PlatformBridgeSource
+from .sources.platform_db import (
+    InMemoryPlatformDBSource,
+    PlatformDBSource,
+    PostgresPlatformDBSource,
+    SQLitePlatformDBSource,
+    sync_pair_history_from_source,
+)
+from .sources.platform_snapshots import (
+    FundingRoundSnapshotSource,
+    FundingRoundSnapshotStore,
+    PostgresFundingRoundSnapshotSource,
+    SQLiteFundingRoundSnapshotSource,
+)
 
 
 def _decimal(value: object, *, default: str | None = None) -> Decimal:
@@ -69,10 +82,12 @@ def _level(payload: object) -> Level:
 class SingleCycleSourceBundle:
     now_utc: datetime
     pair: Pair
-    bridge: PlatformBridgeSource
     platform_db_source: PlatformDBSource
-    liquidation_source: LiquidationSource | None
-    liquidation_source_configured: bool
+    bridge: PlatformBridgeSource | None = None
+    snapshot_source: FundingRoundSnapshotSource | None = None
+    snapshot_store: FundingRoundSnapshotStore | None = None
+    liquidation_source: LiquidationSource | None = None
+    liquidation_source_configured: bool = False
 
     @property
     def has_liquidation_source(self) -> bool:
@@ -92,11 +107,12 @@ class SingleCycleExecutionResult:
 @dataclass(frozen=True)
 class PreparedCycleRuntime:
     scheduler: RoundScheduler
-    collector: SnapshotCollector
+    collector: SnapshotCollector | None
     orchestrator: SingleCycleOrchestrator
     artifact_writer: RunArtifactWriter
     risky_artifact: LogisticArtifact
     safe_artifact: LogisticArtifact
+    slippage_model: str
 
 
 def load_single_cycle_fixture(path: str | Path) -> SingleCycleSourceBundle:
@@ -182,12 +198,49 @@ def load_configured_single_cycle_sources(
     liquidation_source_override: LiquidationSource | None = None,
     liquidation_source_configured_override: bool | None = None,
 ) -> SingleCycleSourceBundle:
-    if settings.live_platform_sources:
-        bridge = LiveHttpPlatformBridge(
+    bridge: PlatformBridgeSource | None = None
+    snapshot_source: FundingRoundSnapshotSource | None = None
+    snapshot_store: FundingRoundSnapshotStore | None = None
+
+    if settings.live_platform_sources and settings.platform_db_path is not None:
+        bridge = ExchangeRestPlatformBridge(
             bybit_base_url=settings.bybit_rest_base_url,
             bitget_base_url=settings.bitget_rest_base_url,
         )
-        platform_db_source: PlatformDBSource = LivePlatformDBSource(
+        from .sources.platform_db import ExchangeRestPlatformDBSource
+
+        live_reference_source = ExchangeRestPlatformDBSource(
+            bybit_base_url=settings.bybit_rest_base_url,
+            bitget_base_url=settings.bitget_rest_base_url,
+        )
+        platform_db_source = SQLitePlatformDBSource(settings.platform_db_path)
+        sync_pair_history_from_source(
+            platform_db_source,
+            live_reference_source,
+            pair=pair,
+            funding_limit=8,
+            open_interest_limit=8,
+        )
+        snapshot_store = SQLiteFundingRoundSnapshotSource(
+            path=settings.platform_db_path,
+            platform_db_source=platform_db_source,
+            open_interest_mode=settings.open_interest_mode,
+        )
+    elif settings.platform_postgres_dsn:
+        platform_db_source: PlatformDBSource = PostgresPlatformDBSource(settings.platform_postgres_dsn)
+        snapshot_source = PostgresFundingRoundSnapshotSource(
+            dsn=settings.platform_postgres_dsn,
+            platform_db_source=platform_db_source,
+            open_interest_mode=settings.open_interest_mode,
+        )
+    elif settings.live_platform_sources:
+        bridge = ExchangeRestPlatformBridge(
+            bybit_base_url=settings.bybit_rest_base_url,
+            bitget_base_url=settings.bitget_rest_base_url,
+        )
+        from .sources.platform_db import ExchangeRestPlatformDBSource
+
+        platform_db_source = ExchangeRestPlatformDBSource(
             bybit_base_url=settings.bybit_rest_base_url,
             bitget_base_url=settings.bitget_rest_base_url,
         )
@@ -223,6 +276,8 @@ def load_configured_single_cycle_sources(
         now_utc=ensure_utc(now_utc or datetime.now(timezone.utc)),
         pair=pair,
         bridge=bridge,
+        snapshot_source=snapshot_source,
+        snapshot_store=snapshot_store,
         platform_db_source=platform_db_source,
         liquidation_source=liquidation_source,
         liquidation_source_configured=liquidation_source_configured,
@@ -234,13 +289,14 @@ def execute_single_cycle(
     settings: Settings,
     run: PaperRun,
     source_bundle: SingleCycleSourceBundle,
+    portfolio: PortfolioSimulator | None = None,
 ) -> SingleCycleExecutionResult:
     prepared_runtime = prepare_cycle_runtime(
         settings=settings,
         source_bundle=source_bundle,
         run=run,
     )
-    portfolio = PortfolioSimulator(run=run)
+    portfolio = portfolio or PortfolioSimulator(run=run)
     return execute_cycle(
         run=run,
         portfolio=portfolio,
@@ -264,12 +320,16 @@ def prepare_cycle_runtime(
         safe_artifact_path=settings.safe_artifact_path,
     )
     scheduler = RoundScheduler(decision_buffer_seconds=settings.decision_buffer_seconds)
-    collector = SnapshotCollector(
-        bridge=source_bundle.bridge,
-        liquidation_source=source_bundle.liquidation_source,
-        market_state_staleness_seconds=settings.market_state_staleness_seconds,
-        orderbook_staleness_seconds=settings.orderbook_staleness_seconds,
-    )
+    collector = None
+    if source_bundle.bridge is not None:
+        collector = SnapshotCollector(
+            bridge=source_bundle.bridge,
+            platform_db_source=source_bundle.platform_db_source,
+            liquidation_source=source_bundle.liquidation_source,
+            market_state_staleness_seconds=settings.market_state_staleness_seconds,
+            orderbook_staleness_seconds=settings.orderbook_staleness_seconds,
+            open_interest_mode=settings.open_interest_mode,
+        )
     orchestrator = build_platform_db_backed_orchestrator(
         platform_db_source=source_bundle.platform_db_source,
         risky_artifact=risky_artifact,
@@ -284,6 +344,7 @@ def prepare_cycle_runtime(
         artifact_writer=build_run_artifact_writer(Path(run.report_output_dir), run.report_filename_pattern),
         risky_artifact=risky_artifact,
         safe_artifact=safe_artifact,
+        slippage_model=settings.slippage_model,
     )
 
 
@@ -296,9 +357,14 @@ def execute_cycle(
     mark_run_finished: bool,
 ) -> SingleCycleExecutionResult:
     funding_decision = prepared_runtime.scheduler.next_decision(source_bundle.now_utc)
-    bybit_snapshot, bitget_snapshot = prepared_runtime.collector.collect_pair_snapshots(
-        pair=source_bundle.pair,
+    bybit_snapshot, bitget_snapshot = _resolve_pair_snapshots(
+        source_bundle=source_bundle,
+        prepared_runtime=prepared_runtime,
         funding_decision=funding_decision,
+    )
+    _persist_pair_snapshots(
+        snapshot_store=source_bundle.snapshot_store,
+        snapshots=(bybit_snapshot, bitget_snapshot),
     )
     cycle_result = prepared_runtime.orchestrator.evaluate(
         SingleCycleInput(
@@ -314,10 +380,20 @@ def execute_cycle(
 
     opened_position_id = None
     if cycle_result.decision.selected:
+        entry_slippage_bps = estimate_entry_slippage_bps(
+            decision=cycle_result.decision,
+            notional=run.current_equity * run.notional_pct,
+            bybit_snapshot=bybit_snapshot,
+            bitget_snapshot=bitget_snapshot,
+            platform_db_source=source_bundle.platform_db_source,
+            model=prepared_runtime.slippage_model,
+            fallback_total_bps=run.slippage_bps,
+        )
         position = portfolio.open_position(
             decision=cycle_result.decision,
             entry_time=source_bundle.now_utc,
             planned_exit_round=prepared_runtime.scheduler.exit_round(cycle_result.decision.funding_round),
+            entry_slippage_bps=entry_slippage_bps,
         )
         opened_position_id = position.position_id
 
@@ -325,6 +401,11 @@ def execute_cycle(
         portfolio=portfolio,
         pair=source_bundle.pair,
         funding_round=funding_decision.funding_round,
+        bybit_snapshot=bybit_snapshot,
+        bitget_snapshot=bitget_snapshot,
+        platform_db_source=source_bundle.platform_db_source,
+        slippage_model=prepared_runtime.slippage_model,
+        fallback_slippage_bps=run.slippage_bps,
         bybit_funding_rate_bps=bybit_snapshot.funding_rate_bps,
         bitget_funding_rate_bps=bitget_snapshot.funding_rate_bps,
     )
@@ -377,11 +458,132 @@ def close_source_bundle(source_bundle: SingleCycleSourceBundle) -> None:
         stop()
 
 
+def _resolve_pair_snapshots(
+    *,
+    source_bundle: SingleCycleSourceBundle,
+    prepared_runtime: PreparedCycleRuntime,
+    funding_decision: FundingDecision,
+) -> tuple[FundingRoundSnapshot, FundingRoundSnapshot]:
+    if source_bundle.snapshot_source is not None:
+        bybit_snapshot = source_bundle.snapshot_source.get_snapshot(
+            exchange="bybit",
+            pair=source_bundle.pair,
+            funding_round=funding_decision.funding_round,
+        )
+        bitget_snapshot = source_bundle.snapshot_source.get_snapshot(
+            exchange="bitget",
+            pair=source_bundle.pair,
+            funding_round=funding_decision.funding_round,
+        )
+        resolved_bybit = _ensure_snapshot(
+            snapshot=bybit_snapshot,
+            exchange="bybit",
+            pair=source_bundle.pair,
+            funding_decision=funding_decision,
+        )
+        resolved_bitget = _ensure_snapshot(
+            snapshot=bitget_snapshot,
+            exchange="bitget",
+            pair=source_bundle.pair,
+            funding_decision=funding_decision,
+        )
+        return (
+            _hydrate_liquidation_window(
+                snapshot=resolved_bybit,
+                liquidation_source=source_bundle.liquidation_source,
+            ),
+            _hydrate_liquidation_window(
+                snapshot=resolved_bitget,
+                liquidation_source=source_bundle.liquidation_source,
+            ),
+        )
+
+    if prepared_runtime.collector is None:
+        raise ValueError("collector is required when snapshot_source is not configured")
+
+    return prepared_runtime.collector.collect_pair_snapshots(
+        pair=source_bundle.pair,
+        funding_decision=funding_decision,
+    )
+
+
+def _ensure_snapshot(
+    *,
+    snapshot: FundingRoundSnapshot | None,
+    exchange: str,
+    pair: Pair,
+    funding_decision: FundingDecision,
+) -> FundingRoundSnapshot:
+    if snapshot is None:
+        return FundingRoundSnapshot(
+            funding_round=funding_decision.funding_round,
+            decision_cutoff=funding_decision.decision_cutoff,
+            exchange=exchange,
+            pair=pair,
+            market_state_observed_at=None,
+            orderbook_observed_at=None,
+            funding_rate_bps=None,
+            mark_price=None,
+            index_price=None,
+            open_interest=None,
+            bid_price=None,
+            ask_price=None,
+            bid_amount=None,
+            ask_amount=None,
+            book_imbalance=None,
+            liquidation_amount_8h=None if exchange == "bybit" else Decimal("0"),
+            liquidation_complete=(exchange != "bybit"),
+            snapshot_valid=False,
+            reason_code=f"missing_platform_snapshot_{exchange}",
+        )
+
+    if snapshot.funding_round != funding_decision.funding_round or snapshot.decision_cutoff != funding_decision.decision_cutoff:
+        return replace(
+            snapshot,
+            funding_round=funding_decision.funding_round,
+            decision_cutoff=funding_decision.decision_cutoff,
+            snapshot_valid=False,
+            reason_code=f"snapshot_round_mismatch_{exchange}",
+        )
+    return snapshot
+
+
+def _hydrate_liquidation_window(
+    *,
+    snapshot: FundingRoundSnapshot,
+    liquidation_source: LiquidationSource | None,
+) -> FundingRoundSnapshot:
+    if snapshot.exchange != "bybit":
+        return replace(snapshot, liquidation_amount_8h=Decimal("0"), liquidation_complete=True)
+    if snapshot.liquidation_complete and snapshot.liquidation_amount_8h is not None:
+        return snapshot
+    if liquidation_source is None:
+        return snapshot
+
+    liquidation_start = snapshot.funding_round - timedelta(hours=8)
+    liquidation_end = snapshot.funding_round
+    amount = liquidation_source.sum_bybit_liquidation_usd(snapshot.pair, liquidation_start, liquidation_end)
+    complete = True
+    covers_window = getattr(liquidation_source, "covers_bybit_liquidation_window", None)
+    if callable(covers_window):
+        complete = bool(covers_window(snapshot.pair, liquidation_start, liquidation_end))
+    return replace(
+        snapshot,
+        liquidation_amount_8h=amount,
+        liquidation_complete=complete,
+    )
+
+
 def _settle_positions_for_round(
     *,
     portfolio: PortfolioSimulator,
     pair: Pair,
     funding_round: datetime,
+    bybit_snapshot: FundingRoundSnapshot,
+    bitget_snapshot: FundingRoundSnapshot,
+    platform_db_source: PlatformDBSource,
+    slippage_model: str,
+    fallback_slippage_bps: Decimal,
     bybit_funding_rate_bps: Decimal | None,
     bitget_funding_rate_bps: Decimal | None,
 ) -> tuple[str, ...]:
@@ -393,14 +595,36 @@ def _settle_positions_for_round(
             continue
         if position.rounds and position.rounds[-1].funding_round >= funding_round:
             continue
+        exit_slippage_bps = None
+        if position.rounds_collected + 1 == 3:
+            exit_slippage_bps = estimate_exit_slippage_bps(
+                position=position,
+                bybit_snapshot=bybit_snapshot,
+                bitget_snapshot=bitget_snapshot,
+                platform_db_source=platform_db_source,
+                model=slippage_model,
+                fallback_total_bps=fallback_slippage_bps,
+            )
         portfolio.settle_round(
             position_id=position_id,
             funding_round=funding_round,
             bybit_funding_rate_bps=bybit_funding_rate_bps,
             bitget_funding_rate_bps=bitget_funding_rate_bps,
+            exit_slippage_bps=exit_slippage_bps,
         )
         settled.append(position_id)
     return tuple(settled)
+
+
+def _persist_pair_snapshots(
+    *,
+    snapshot_store: FundingRoundSnapshotStore | None,
+    snapshots: tuple[FundingRoundSnapshot, FundingRoundSnapshot],
+) -> None:
+    if snapshot_store is None:
+        return
+    for snapshot in snapshots:
+        snapshot_store.put_snapshot(snapshot)
 
 
 def _funding_history(pair: Pair, payload: object) -> list[Funding]:

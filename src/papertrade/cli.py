@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .config import Settings
+from .enums import RunStatus
 from .contracts import Pair, PaperRun
 from .continuous_runtime import (
     ContinuousForwardRunner,
@@ -14,6 +15,7 @@ from .continuous_runtime import (
     build_simulated_now_provider,
     real_sleep,
 )
+from .portfolio import PortfolioSimulator
 from .runtime import preflight_live_source_status, preflight_status, resolve_runtime_availability
 from .single_cycle_runtime import (
     build_run_artifact_writer,
@@ -22,6 +24,7 @@ from .single_cycle_runtime import (
     load_configured_single_cycle_sources,
     load_single_cycle_fixture,
 )
+from .state_store import SQLiteStateStore
 
 
 def _parse_pair(value: str) -> Pair:
@@ -50,6 +53,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_forward_parser.add_argument("--max-cycles", type=int, default=None)
     run_forward_parser.add_argument("--poll-seconds", type=int, default=30)
     run_forward_parser.add_argument("--strict-liquidation", choices=["true", "false"], default=None)
+    run_forward_parser.add_argument("--state-db", type=Path, default=None)
+    run_forward_parser.add_argument("--platform-db", type=Path, default=None)
+    run_forward_parser.add_argument("--platform-postgres-dsn", default=None)
+    run_forward_parser.add_argument("--resume-latest", action="store_true")
+    run_forward_parser.add_argument("--resume-run-id", default=None)
     return parser
 
 
@@ -62,6 +70,11 @@ def run_forward(
     continuous: bool = False,
     max_cycles: int | None = None,
     poll_seconds: int = 30,
+    state_db: Path | None = None,
+    platform_db: Path | None = None,
+    platform_postgres_dsn: str | None = None,
+    resume_latest: bool = False,
+    resume_run_id: str | None = None,
 ) -> int:
     settings = Settings.from_env()
     runner: ContinuousForwardRunner | None = None
@@ -69,21 +82,26 @@ def run_forward(
         settings.report_output_dir = report_dir
     if strict_liquidation is not None:
         settings.strict_liquidation = strict_liquidation
+    if state_db is not None:
+        settings.state_db_path = state_db
+    if platform_db is not None:
+        settings.platform_db_path = platform_db
+    if platform_postgres_dsn is not None:
+        settings.platform_postgres_dsn = platform_postgres_dsn or None
+    if settings.state_db_path is None and settings.platform_db_path is not None:
+        settings.state_db_path = settings.platform_db_path
+    settings.validate()
+    if resume_latest and resume_run_id is not None:
+        raise ValueError("resume_latest and resume_run_id are mutually exclusive")
+    if (resume_latest or resume_run_id is not None) and settings.state_db_path is None:
+        raise ValueError("state_db_path must be configured to resume runs")
 
-    run = PaperRun.new(
-        run_id=f"paper-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid4().hex[:8]}",
-        strategy=settings.strategy,
-        runtime_mode=settings.runtime_mode,
-        report_output_dir=str(settings.report_output_dir),
-        report_filename_pattern=settings.report_filename_pattern,
-        initial_equity=settings.initial_equity,
-        notional_pct=settings.notional_pct,
-        fee_bps=settings.fee_bps,
-        slippage_bps=settings.slippage_bps,
-        decision_buffer_seconds=settings.decision_buffer_seconds,
-        market_state_staleness_sec=settings.market_state_staleness_seconds,
-        orderbook_staleness_sec=settings.orderbook_staleness_seconds,
-        strict_liquidation=settings.strict_liquidation,
+    state_store = SQLiteStateStore(settings.state_db_path) if settings.state_db_path is not None else None
+    run = _resolve_run(
+        settings=settings,
+        state_store=state_store,
+        resume_latest=resume_latest,
+        resume_run_id=resume_run_id,
     )
 
     source_bundle = None
@@ -92,6 +110,9 @@ def run_forward(
             raise ValueError("continuous mode does not support --input-file")
         if continuous and now_utc is not None and max_cycles is None:
             raise ValueError("continuous mode with --now-utc requires --max-cycles")
+
+        if state_store is not None:
+            state_store.save_run(run)
 
         if input_file is not None:
             source_bundle = load_single_cycle_fixture(input_file)
@@ -106,6 +127,8 @@ def run_forward(
         status, reason = preflight_status(settings, availability)
         if status == "blocked":
             run.mark_blocked(reason)
+            if state_store is not None:
+                state_store.save_run(run)
             print(f"run blocked: {run.status_reason}")
             return 2
 
@@ -113,6 +136,8 @@ def run_forward(
             status, reason = preflight_live_source_status(availability)
             if status == "blocked":
                 run.mark_blocked(reason)
+                if state_store is not None:
+                    state_store.save_run(run)
                 print(f"run blocked: {run.status_reason}")
                 return 2
 
@@ -121,6 +146,7 @@ def run_forward(
                     settings=settings,
                     run=run,
                     source_loader=build_real_source_loader(settings, pair),
+                    state_store=state_store,
                     pair=pair,
                 )
                 if now_utc is None:
@@ -155,13 +181,30 @@ def run_forward(
             )
 
         if source_bundle is None:
+            if state_store is not None:
+                state_store.save_run(run)
             print(f"run ready: {run.run_id}")
             return 0
+
+        portfolio = None
+        if state_store is not None:
+            portfolio = PortfolioSimulator.from_state(
+                run=run,
+                positions=state_store.load_positions(run.run_id),
+                trades=state_store.load_trades(run.run_id),
+            )
 
         result = execute_single_cycle(
             settings=settings,
             run=run,
             source_bundle=source_bundle,
+            portfolio=portfolio,
+        )
+        _persist_single_cycle_result(
+            state_store=state_store,
+            run=run,
+            result=result,
+            portfolio=portfolio,
         )
     except Exception as exc:
         run.mark_failed(str(exc))
@@ -173,6 +216,11 @@ def run_forward(
             open_positions=0,
             closed_trades=[],
         )
+        if state_store is not None:
+            state_store.save_run(run)
+            state_store.record_report(run_id=run.run_id, as_of_round=as_of_round, report_type="summary", report_path=artifact_paths.summary_path)
+            state_store.record_report(run_id=run.run_id, as_of_round=as_of_round, report_type="run_metadata", report_path=artifact_paths.run_metadata_path)
+            state_store.record_report(run_id=run.run_id, as_of_round=as_of_round, report_type="trade_log", report_path=artifact_paths.trade_log_path)
         print(f"run failed: {run.status_reason}")
         print(f"summary: {artifact_paths.summary_path}")
         return 1
@@ -197,18 +245,131 @@ def main(argv: list[str] | None = None) -> int:
         strict = None
         if args.strict_liquidation is not None:
             strict = args.strict_liquidation == "true"
-        return run_forward(
-            report_dir=args.report_dir,
-            strict_liquidation=strict,
-            input_file=args.input_file,
-            pair=args.pair,
-            now_utc=args.now_utc,
-            continuous=args.continuous,
-            max_cycles=args.max_cycles,
-            poll_seconds=args.poll_seconds,
-        )
+        try:
+            return run_forward(
+                report_dir=args.report_dir,
+                strict_liquidation=strict,
+                input_file=args.input_file,
+                pair=args.pair,
+                now_utc=args.now_utc,
+                continuous=args.continuous,
+                max_cycles=args.max_cycles,
+                poll_seconds=args.poll_seconds,
+                state_db=args.state_db,
+                platform_db=args.platform_db,
+                platform_postgres_dsn=args.platform_postgres_dsn,
+                resume_latest=args.resume_latest,
+                resume_run_id=args.resume_run_id,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
     parser.error(f"unknown command: {args.command}")
     return 2
+
+
+def _resolve_run(
+    *,
+    settings: Settings,
+    state_store: SQLiteStateStore | None,
+    resume_latest: bool,
+    resume_run_id: str | None,
+) -> PaperRun:
+    if state_store is None:
+        return _new_run(settings)
+
+    existing_run = None
+    if resume_run_id is not None:
+        existing_run = state_store.load_run(resume_run_id)
+        if existing_run is None:
+            raise ValueError(f"resume_run_id not found: {resume_run_id}")
+    elif resume_latest:
+        existing_run = state_store.load_latest_resumable_run(
+            strategy=settings.strategy,
+            runtime_mode=settings.runtime_mode,
+        )
+        if existing_run is None:
+            raise ValueError("no resumable run found")
+
+    if existing_run is None:
+        return _new_run(settings)
+
+    existing_run.status = RunStatus.RUNNING
+    existing_run.status_reason = "ok"
+    existing_run.finished_at = None
+    existing_run.report_output_dir = str(settings.report_output_dir)
+    existing_run.report_filename_pattern = settings.report_filename_pattern
+    existing_run.decision_buffer_seconds = settings.decision_buffer_seconds
+    existing_run.market_state_staleness_sec = settings.market_state_staleness_seconds
+    existing_run.orderbook_staleness_sec = settings.orderbook_staleness_seconds
+    existing_run.bybit_taker_fee_bps = settings.bybit_taker_fee_bps
+    existing_run.bitget_taker_fee_bps = settings.bitget_taker_fee_bps
+    existing_run.fee_bps = settings.fee_bps
+    existing_run.slippage_bps = settings.slippage_bps
+    existing_run.strict_liquidation = settings.strict_liquidation
+    return existing_run
+
+
+def _new_run(settings: Settings) -> PaperRun:
+    return PaperRun.new(
+        run_id=f"paper-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid4().hex[:8]}",
+        strategy=settings.strategy,
+        runtime_mode=settings.runtime_mode,
+        report_output_dir=str(settings.report_output_dir),
+        report_filename_pattern=settings.report_filename_pattern,
+        initial_equity=settings.initial_equity,
+        notional_pct=settings.notional_pct,
+        slippage_bps=settings.slippage_bps,
+        decision_buffer_seconds=settings.decision_buffer_seconds,
+        market_state_staleness_sec=settings.market_state_staleness_seconds,
+        orderbook_staleness_sec=settings.orderbook_staleness_seconds,
+        strict_liquidation=settings.strict_liquidation,
+        bybit_taker_fee_bps=settings.bybit_taker_fee_bps,
+        bitget_taker_fee_bps=settings.bitget_taker_fee_bps,
+    )
+
+
+def _persist_single_cycle_result(
+    *,
+    state_store: SQLiteStateStore | None,
+    run: PaperRun,
+    result,
+    portfolio: PortfolioSimulator | None,
+) -> None:
+    if state_store is None:
+        return
+
+    state_store.save_run(run)
+    state_store.replace_feature_snapshots([result.cycle_result.feature])
+    resolved_portfolio = portfolio or PortfolioSimulator(run=run)
+    state_store.replace_portfolio_state(
+        run_id=run.run_id,
+        positions=resolved_portfolio.positions.values(),
+        trades=resolved_portfolio.trades,
+    )
+    state_store.record_report(
+        run_id=run.run_id,
+        as_of_round=result.funding_decision.funding_round,
+        report_type="summary",
+        report_path=result.artifact_paths.summary_path,
+    )
+    state_store.record_report(
+        run_id=run.run_id,
+        as_of_round=result.funding_decision.funding_round,
+        report_type="run_metadata",
+        report_path=result.artifact_paths.run_metadata_path,
+    )
+    state_store.record_report(
+        run_id=run.run_id,
+        as_of_round=result.funding_decision.funding_round,
+        report_type="trade_log",
+        report_path=result.artifact_paths.trade_log_path,
+    )
+    state_store.record_report(
+        run_id=run.run_id,
+        as_of_round=result.funding_decision.funding_round,
+        report_type="cycle",
+        report_path=result.cycle_artifact_path,
+    )
 
 
 if __name__ == "__main__":

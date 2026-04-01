@@ -8,8 +8,9 @@ from typing import Callable, Sequence
 from .config import Settings
 from .contracts import Pair, PaperRun
 from .portfolio import PortfolioSimulator
+from .state_store import SQLiteStateStore
 from .sources.liquidation import BybitLiveLiquidationSource
-from .sources.platform_db import LivePlatformDBSource, SQLitePlatformDBSource
+from .sources.platform_db import PostgresPlatformDBSource, SQLitePlatformDBSource, sync_all_instruments_from_source
 from .single_cycle_runtime import (
     PreparedCycleRuntime,
     SingleCycleExecutionResult,
@@ -35,6 +36,7 @@ class ContinuousForwardRunner:
     settings: Settings
     run: PaperRun
     source_loader: SourceLoader
+    state_store: SQLiteStateStore | None = None
     pair: Pair | None = None
     portfolio: PortfolioSimulator = field(init=False)
     processed_rounds: set[datetime] = field(default_factory=set)
@@ -42,7 +44,17 @@ class ContinuousForwardRunner:
     last_cycle_result: ContinuousCycleResult | None = None
 
     def __post_init__(self) -> None:
-        self.portfolio = PortfolioSimulator(run=self.run)
+        if self.state_store is not None:
+            positions = self.state_store.load_positions(self.run.run_id)
+            trades = self.state_store.load_trades(self.run.run_id)
+            self.portfolio = PortfolioSimulator.from_state(
+                run=self.run,
+                positions=positions,
+                trades=trades,
+            )
+            self.state_store.save_run(self.run)
+        else:
+            self.portfolio = PortfolioSimulator(run=self.run)
 
     def process_cycle(self, now_utc: datetime) -> ContinuousCycleResult | None:
         source_bundles = _normalize_source_bundles(self.source_loader(now_utc))
@@ -91,27 +103,34 @@ class ContinuousForwardRunner:
         self.processed_rounds.add(cycle_funding_round)
         self.last_cycle_result = cycle_result
         self.last_result = results[-1] if results else None
+        self._sync_state_store(cycle_result)
         return cycle_result
 
     def finish(self) -> None:
         self.run.mark_finished()
+        artifact_writer = build_run_artifact_writer(self._report_dir(), self.run.report_filename_pattern)
         if self.last_result is None:
-            artifact_writer = build_run_artifact_writer(self._report_dir(), self.run.report_filename_pattern)
-            artifact_writer.write_outputs(
+            paths = artifact_writer.write_outputs(
                 run=self.run,
                 as_of_round=datetime.now(timezone.utc),
                 open_positions=0,
                 closed_trades=self.portfolio.trades,
             )
-            return
+            as_of_round = datetime.now(timezone.utc)
+        else:
+            as_of_round = self.last_cycle_result.funding_round if self.last_cycle_result is not None else self.last_result.funding_decision.funding_round
+            paths = artifact_writer.write_outputs(
+                run=self.run,
+                as_of_round=as_of_round,
+                open_positions=sum(1 for position in self.portfolio.positions.values() if position.state.value == "open"),
+                closed_trades=self.portfolio.trades,
+            )
 
-        artifact_writer = build_run_artifact_writer(self._report_dir(), self.run.report_filename_pattern)
-        artifact_writer.write_outputs(
-            run=self.run,
-            as_of_round=self.last_cycle_result.funding_round if self.last_cycle_result is not None else self.last_result.funding_decision.funding_round,
-            open_positions=sum(1 for position in self.portfolio.positions.values() if position.state.value == "open"),
-            closed_trades=self.portfolio.trades,
-        )
+        if self.state_store is not None:
+            self.state_store.save_run(self.run)
+            self.state_store.record_report(run_id=self.run.run_id, as_of_round=as_of_round, report_type="summary", report_path=paths.summary_path)
+            self.state_store.record_report(run_id=self.run.run_id, as_of_round=as_of_round, report_type="run_metadata", report_path=paths.run_metadata_path)
+            self.state_store.record_report(run_id=self.run.run_id, as_of_round=as_of_round, report_type="trade_log", report_path=paths.trade_log_path)
 
     def close(self) -> None:
         close = getattr(self.source_loader, "close", None)
@@ -148,6 +167,45 @@ class ContinuousForwardRunner:
 
         return Path(self.run.report_output_dir)
 
+    def _sync_state_store(self, cycle_result: ContinuousCycleResult) -> None:
+        if self.state_store is None:
+            return
+        self.state_store.save_run(self.run)
+        self.state_store.replace_feature_snapshots(
+            result.cycle_result.feature
+            for result in cycle_result.results
+        )
+        self.state_store.replace_portfolio_state(
+            run_id=self.run.run_id,
+            positions=self.portfolio.positions.values(),
+            trades=self.portfolio.trades,
+        )
+        for result in cycle_result.results:
+            self.state_store.record_report(
+                run_id=self.run.run_id,
+                as_of_round=result.funding_decision.funding_round,
+                report_type="summary",
+                report_path=result.artifact_paths.summary_path,
+            )
+            self.state_store.record_report(
+                run_id=self.run.run_id,
+                as_of_round=result.funding_decision.funding_round,
+                report_type="run_metadata",
+                report_path=result.artifact_paths.run_metadata_path,
+            )
+            self.state_store.record_report(
+                run_id=self.run.run_id,
+                as_of_round=result.funding_decision.funding_round,
+                report_type="trade_log",
+                report_path=result.artifact_paths.trade_log_path,
+            )
+            self.state_store.record_report(
+                run_id=self.run.run_id,
+                as_of_round=result.funding_decision.funding_round,
+                report_type="cycle",
+                report_path=result.cycle_artifact_path,
+            )
+
 
 def build_real_source_loader(settings: Settings, pair: Pair | None) -> SourceLoader:
     return RealSourceLoader(settings=settings, pair=pair)
@@ -159,6 +217,8 @@ class RealSourceLoader:
     pair: Pair | None
     _shared_liquidation_source: BybitLiveLiquidationSource | None = field(init=False, default=None)
     _shared_pairs: tuple[Pair, ...] = field(init=False, default_factory=tuple)
+    _resolved_pairs_cache: tuple[Pair, ...] = field(init=False, default_factory=tuple)
+    _resolved_pairs_loaded_at: datetime | None = field(init=False, default=None)
 
     def __call__(self, now_utc: datetime) -> tuple[SingleCycleSourceBundle, ...]:
         pairs = self._resolve_pairs()
@@ -186,21 +246,41 @@ class RealSourceLoader:
     def _resolve_pairs(self) -> tuple[Pair, ...]:
         if self.pair is not None:
             return (self.pair,)
+        if (
+            self._resolved_pairs_cache
+            and self._resolved_pairs_loaded_at is not None
+            and datetime.now(timezone.utc) - self._resolved_pairs_loaded_at < timedelta(hours=1)
+        ):
+            return self._resolved_pairs_cache
 
-        if self.settings.platform_db_path is None and not self.settings.live_platform_sources:
-            raise ValueError("platform_db_path must be configured")
+        if self.settings.live_platform_sources and self.settings.platform_db_path is not None:
+            from .sources.platform_db import ExchangeRestPlatformDBSource
 
-        if self.settings.live_platform_sources:
-            platform_db_source = LivePlatformDBSource(
+            platform_db_source = SQLitePlatformDBSource(self.settings.platform_db_path)
+            live_reference_source = ExchangeRestPlatformDBSource(
+                bybit_base_url=self.settings.bybit_rest_base_url,
+                bitget_base_url=self.settings.bitget_rest_base_url,
+            )
+            sync_all_instruments_from_source(platform_db_source, live_reference_source)
+        elif self.settings.platform_postgres_dsn:
+            platform_db_source = PostgresPlatformDBSource(self.settings.platform_postgres_dsn)
+        elif self.settings.live_platform_sources:
+            from .sources.platform_db import ExchangeRestPlatformDBSource
+
+            platform_db_source = ExchangeRestPlatformDBSource(
                 bybit_base_url=self.settings.bybit_rest_base_url,
                 bitget_base_url=self.settings.bitget_rest_base_url,
             )
         else:
+            if self.settings.platform_db_path is None:
+                raise ValueError("platform_db_path must be configured")
             platform_db_source = SQLitePlatformDBSource(self.settings.platform_db_path)
 
         pairs = tuple(platform_db_source.list_pairs())
         if not pairs:
             raise ValueError("no eligible pairs found in platform_db_source")
+        self._resolved_pairs_cache = pairs
+        self._resolved_pairs_loaded_at = datetime.now(timezone.utc)
         return pairs
 
     def _get_shared_liquidation_source(

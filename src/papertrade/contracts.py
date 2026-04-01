@@ -274,6 +274,8 @@ class PaperRun:
     peak_equity: Decimal
     max_drawdown_pct: Decimal
     notional_pct: Decimal
+    bybit_taker_fee_bps: Decimal
+    bitget_taker_fee_bps: Decimal
     fee_bps: Decimal
     slippage_bps: Decimal
     decision_buffer_seconds: int
@@ -292,13 +294,20 @@ class PaperRun:
         report_filename_pattern: str,
         initial_equity: Decimal,
         notional_pct: Decimal,
-        fee_bps: Decimal,
         slippage_bps: Decimal,
         decision_buffer_seconds: int,
         market_state_staleness_sec: int,
         orderbook_staleness_sec: int,
         strict_liquidation: bool,
+        fee_bps: Decimal | None = None,
+        bybit_taker_fee_bps: Decimal | None = None,
+        bitget_taker_fee_bps: Decimal | None = None,
     ) -> "PaperRun":
+        resolved_bybit_taker_fee_bps, resolved_bitget_taker_fee_bps, resolved_fee_bps = _resolve_fee_configuration(
+            fee_bps=fee_bps,
+            bybit_taker_fee_bps=bybit_taker_fee_bps,
+            bitget_taker_fee_bps=bitget_taker_fee_bps,
+        )
         return cls(
             run_id=run_id,
             strategy=strategy,
@@ -314,7 +323,9 @@ class PaperRun:
             peak_equity=initial_equity,
             max_drawdown_pct=Decimal("0"),
             notional_pct=notional_pct,
-            fee_bps=fee_bps,
+            bybit_taker_fee_bps=resolved_bybit_taker_fee_bps,
+            bitget_taker_fee_bps=resolved_bitget_taker_fee_bps,
+            fee_bps=resolved_fee_bps,
             slippage_bps=slippage_bps,
             decision_buffer_seconds=decision_buffer_seconds,
             market_state_staleness_sec=market_state_staleness_sec,
@@ -336,3 +347,24 @@ class PaperRun:
         self.status = RunStatus.FINISHED
         self.status_reason = "ok"
         self.finished_at = utc_now()
+
+
+def _resolve_fee_configuration(
+    *,
+    fee_bps: Decimal | None,
+    bybit_taker_fee_bps: Decimal | None,
+    bitget_taker_fee_bps: Decimal | None,
+) -> tuple[Decimal, Decimal, Decimal]:
+    if bybit_taker_fee_bps is None and bitget_taker_fee_bps is None:
+        if fee_bps is None:
+            raise ValueError("fee configuration is required")
+        resolved_bybit_taker_fee_bps = fee_bps / Decimal("4")
+        resolved_bitget_taker_fee_bps = fee_bps / Decimal("4")
+    elif bybit_taker_fee_bps is None or bitget_taker_fee_bps is None:
+        raise ValueError("bybit_taker_fee_bps and bitget_taker_fee_bps must be configured together")
+    else:
+        resolved_bybit_taker_fee_bps = bybit_taker_fee_bps
+        resolved_bitget_taker_fee_bps = bitget_taker_fee_bps
+
+    resolved_fee_bps = (resolved_bybit_taker_fee_bps + resolved_bitget_taker_fee_bps) * Decimal("2")
+    return resolved_bybit_taker_fee_bps, resolved_bitget_taker_fee_bps, resolved_fee_bps

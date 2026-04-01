@@ -10,6 +10,7 @@ from papertrade.config import Settings
 from papertrade.continuous_runtime import ContinuousForwardRunner, build_simulated_now_provider
 from papertrade.contracts import PaperRun, Pair
 from papertrade.single_cycle_runtime import load_single_cycle_fixture
+from papertrade.state_store import SQLiteStateStore
 
 
 def make_artifact_payloads() -> tuple[dict[str, object], dict[str, object]]:
@@ -490,3 +491,98 @@ class ContinuousRuntimeTests(unittest.TestCase):
         self.assertEqual(len(runner.last_cycle_result.results), 2)
         open_positions = [position for position in runner.portfolio.positions.values() if position.state.value == "open"]
         self.assertEqual(open_positions, [])
+
+    def test_continuous_runner_recovers_open_positions_from_state_store(self) -> None:
+        risky_payload, safe_payload = make_artifact_payloads()
+        pair = Pair("BTC", "USDT")
+        cycle_times = (
+            datetime(2025, 1, 11, 7, 59, 0, tzinfo=timezone.utc),
+            datetime(2025, 1, 11, 15, 59, 0, tzinfo=timezone.utc),
+        )
+
+        cycle_payloads = {
+            cycle_times[0]: make_fixture_payload(
+                now_utc="2025-01-11T07:59:00+00:00",
+                bybit_rate="0.0005",
+                bitget_rate="0.0002",
+                bybit_updated_at="2025-01-11T07:59:20+00:00",
+                bitget_updated_at="2025-01-11T07:59:20+00:00",
+                bybit_orderbook_updated_at="2025-01-11T07:59:25+00:00",
+                bitget_orderbook_updated_at="2025-01-11T07:59:25+00:00",
+                funding_history=[
+                    {"exchange": "bybit", "time": "2025-01-11T00:00:00+00:00", "funding_rate": "0.0005"},
+                    {"exchange": "bitget", "time": "2025-01-11T00:00:00+00:00", "funding_rate": "0.0002"},
+                    {"exchange": "bybit", "time": "2025-01-10T16:00:00+00:00", "funding_rate": "0.0004"},
+                    {"exchange": "bitget", "time": "2025-01-10T16:00:00+00:00", "funding_rate": "0.0001"},
+                    {"exchange": "bybit", "time": "2025-01-10T08:00:00+00:00", "funding_rate": "0.0003"},
+                    {"exchange": "bitget", "time": "2025-01-10T08:00:00+00:00", "funding_rate": "0.0001"},
+                ],
+            ),
+            cycle_times[1]: make_fixture_payload(
+                now_utc="2025-01-11T15:59:00+00:00",
+                bybit_rate="0.0004",
+                bitget_rate="0.0001",
+                bybit_updated_at="2025-01-11T15:59:20+00:00",
+                bitget_updated_at="2025-01-11T15:59:20+00:00",
+                bybit_orderbook_updated_at="2025-01-11T15:59:25+00:00",
+                bitget_orderbook_updated_at="2025-01-11T15:59:25+00:00",
+                funding_history=[
+                    {"exchange": "bybit", "time": "2025-01-11T08:00:00+00:00", "funding_rate": "0.0005"},
+                    {"exchange": "bitget", "time": "2025-01-11T08:00:00+00:00", "funding_rate": "0.0002"},
+                    {"exchange": "bybit", "time": "2025-01-11T00:00:00+00:00", "funding_rate": "0.0005"},
+                    {"exchange": "bitget", "time": "2025-01-11T00:00:00+00:00", "funding_rate": "0.0002"},
+                    {"exchange": "bybit", "time": "2025-01-10T16:00:00+00:00", "funding_rate": "0.0004"},
+                    {"exchange": "bitget", "time": "2025-01-10T16:00:00+00:00", "funding_rate": "0.0001"},
+                ],
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_dir = Path(tmpdir)
+            risky_path = base_dir / "risky.json"
+            safe_path = base_dir / "safe.json"
+            risky_path.write_text(json.dumps(risky_payload), encoding="utf-8")
+            safe_path.write_text(json.dumps(safe_payload), encoding="utf-8")
+            state_store = SQLiteStateStore(base_dir / "state.sqlite3")
+
+            bundle_by_time = {}
+            for now_value, payload in cycle_payloads.items():
+                fixture_path = base_dir / f"{now_value.strftime('%Y%m%dT%H%M%S')}.json"
+                fixture_path.write_text(json.dumps(payload), encoding="utf-8")
+                bundle_by_time[now_value] = load_single_cycle_fixture(fixture_path)
+
+            settings = Settings(
+                report_output_dir=base_dir / "reports",
+                risky_artifact_path=risky_path,
+                safe_artifact_path=safe_path,
+                state_db_path=base_dir / "state.sqlite3",
+            )
+            initial_run = make_run(settings)
+            first_runner = ContinuousForwardRunner(
+                settings=settings,
+                run=initial_run,
+                pair=pair,
+                source_loader=lambda now_utc: bundle_by_time[now_utc],
+                state_store=state_store,
+            )
+
+            first_result = first_runner.process_cycle(cycle_times[0])
+            resumed_run = state_store.load_run(initial_run.run_id)
+            assert resumed_run is not None
+            resumed_runner = ContinuousForwardRunner(
+                settings=settings,
+                run=resumed_run,
+                pair=pair,
+                source_loader=lambda now_utc: bundle_by_time[now_utc],
+                state_store=state_store,
+            )
+            second_result = resumed_runner.process_cycle(cycle_times[1])
+
+        self.assertIsNotNone(first_result)
+        self.assertIsNotNone(second_result)
+        self.assertEqual(len(first_runner.portfolio.trades), 0)
+        self.assertEqual(len(resumed_runner.portfolio.trades), 0)
+        open_positions = [position for position in resumed_runner.portfolio.positions.values() if position.state.value == "open"]
+        self.assertEqual(len(open_positions), 1)
+        self.assertEqual(open_positions[0].rounds_collected, 2)
+        self.assertEqual(len(open_positions[0].rounds), 2)

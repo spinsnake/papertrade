@@ -1,33 +1,111 @@
 # papertrade
 
-Python scaffold for forward paper trading using platform-compatible contracts.
+Standalone forward paper trade runtime for the `hybrid_aggressive_safe_valid` strategy.
 
-Current scope:
-- domain contracts
-- scheduler
-- scoring engine
-- rule evaluator
-- portfolio simulator
-- report and persistence pipeline
-- in-memory adapters
-- SQLite/JSON-backed source adapters
-- live Bybit/Bitget REST source adapters
-- single-cycle CLI runtime
-- continuous multi-cycle CLI runtime
-- multi-pair continuous loop from SQLite pair universe
-- single-pair live REST runtime
-- test suite
+## Current Architecture
 
-Not implemented yet:
-- full-precision research artifacts
-- research acceptance tests
+- live market data comes from direct Bybit/Bitget REST calls
+- Bybit liquidation completeness comes from the Python websocket/cache
+- one SQLite file is the source-of-truth for:
+  - `instruments`
+  - `funding`
+  - `open_interest`
+  - `funding_round_snapshots`
+  - `paper_runs`
+  - `feature_snapshots`
+  - `paper_positions`
+  - `paper_position_rounds`
+  - `paper_trades`
+  - `paper_reports`
+- model artifacts are bundled in `artifacts/risky.json` and `artifacts/safe.json`
+- slippage uses `top_of_book` by default, with fixed-bps fallback
 
-Run CLI:
+The default standalone deployment path does not require PostgreSQL.
+
+## Main Files
+
+- config: [src/papertrade/config.py](/d:/git/papertrade/src/papertrade/config.py)
+- CLI: [src/papertrade/cli.py](/d:/git/papertrade/src/papertrade/cli.py)
+- live runner: [src/papertrade/continuous_runtime.py](/d:/git/papertrade/src/papertrade/continuous_runtime.py)
+- cycle runtime: [src/papertrade/single_cycle_runtime.py](/d:/git/papertrade/src/papertrade/single_cycle_runtime.py)
+- SQLite market/history store: [src/papertrade/sources/platform_db.py](/d:/git/papertrade/src/papertrade/sources/platform_db.py)
+- SQLite snapshot store: [src/papertrade/sources/platform_snapshots.py](/d:/git/papertrade/src/papertrade/sources/platform_snapshots.py)
+- state store: [src/papertrade/state_store.py](/d:/git/papertrade/src/papertrade/state_store.py)
+
+## Environment
+
+See [.env.example](/d:/git/papertrade/.env.example).
+
+Important env vars for standalone live mode:
+
+- `PAPERTRADE_RISKY_ARTIFACT_PATH=artifacts\\risky.json`
+- `PAPERTRADE_SAFE_ARTIFACT_PATH=artifacts\\safe.json`
+- `PAPERTRADE_PLATFORM_DB_PATH=data\\papertrade.sqlite3`
+- `PAPERTRADE_STATE_DB_PATH=data\\papertrade.sqlite3`
+- `PAPERTRADE_BYBIT_TAKER_FEE_BPS=6`
+- `PAPERTRADE_BITGET_TAKER_FEE_BPS=6`
+- `PAPERTRADE_LIVE_PLATFORM_SOURCES=true`
+- `PAPERTRADE_LIVE_LIQUIDATION_SOURCE=true`
+- `PAPERTRADE_LIVE_LIQUIDATION_CACHE_PATH=data\\liquidation-cache.json`
+- `PAPERTRADE_SLIPPAGE_MODEL=top_of_book`
+
+If `PAPERTRADE_STATE_DB_PATH` is omitted and `PAPERTRADE_PLATFORM_DB_PATH` is set, the runtime reuses the same SQLite file automatically.
+
+## CLI
+
+Entrypoint:
+
+```powershell
+python -m papertrade.cli run-forward
+```
+
+Useful args:
+
+- `--pair BTC/USDT`
+- `--continuous`
+- `--max-cycles 3`
+- `--poll-seconds 30`
+- `--platform-db data\papertrade.sqlite3`
+- `--state-db data\papertrade.sqlite3`
+- `--resume-latest`
+- `--resume-run-id <run_id>`
+
+## Run Examples
 
 Preflight only:
 
 ```powershell
 python -m papertrade.cli run-forward
+```
+
+Standalone SQLite live run:
+
+```powershell
+$env:PAPERTRADE_RISKY_ARTIFACT_PATH="artifacts\\risky.json"
+$env:PAPERTRADE_SAFE_ARTIFACT_PATH="artifacts\\safe.json"
+$env:PAPERTRADE_PLATFORM_DB_PATH="data\\papertrade.sqlite3"
+$env:PAPERTRADE_STATE_DB_PATH="data\\papertrade.sqlite3"
+$env:PAPERTRADE_BYBIT_TAKER_FEE_BPS="6"
+$env:PAPERTRADE_BITGET_TAKER_FEE_BPS="6"
+$env:PAPERTRADE_LIVE_PLATFORM_SOURCES="true"
+$env:PAPERTRADE_LIVE_LIQUIDATION_SOURCE="true"
+$env:PAPERTRADE_LIVE_LIQUIDATION_CACHE_PATH="data\\liquidation-cache.json"
+python -m papertrade.cli run-forward --continuous --poll-seconds 30 --report-dir reports
+```
+
+Resume latest interrupted run:
+
+```powershell
+$env:PAPERTRADE_RISKY_ARTIFACT_PATH="artifacts\\risky.json"
+$env:PAPERTRADE_SAFE_ARTIFACT_PATH="artifacts\\safe.json"
+$env:PAPERTRADE_PLATFORM_DB_PATH="data\\papertrade.sqlite3"
+$env:PAPERTRADE_STATE_DB_PATH="data\\papertrade.sqlite3"
+$env:PAPERTRADE_BYBIT_TAKER_FEE_BPS="6"
+$env:PAPERTRADE_BITGET_TAKER_FEE_BPS="6"
+$env:PAPERTRADE_LIVE_PLATFORM_SOURCES="true"
+$env:PAPERTRADE_LIVE_LIQUIDATION_SOURCE="true"
+$env:PAPERTRADE_LIVE_LIQUIDATION_CACHE_PATH="data\\liquidation-cache.json"
+python -m papertrade.cli run-forward --continuous --poll-seconds 30 --resume-latest --report-dir reports
 ```
 
 Fixture-backed single cycle:
@@ -38,7 +116,7 @@ $env:PAPERTRADE_SAFE_ARTIFACT_PATH="artifacts\\safe.json"
 python -m papertrade.cli run-forward --input-file fixtures\\cycle.json --report-dir reports
 ```
 
-SQLite/JSON-backed single cycle:
+Local SQLite plus JSON replay:
 
 ```powershell
 $env:PAPERTRADE_RISKY_ARTIFACT_PATH="artifacts\\risky.json"
@@ -50,130 +128,39 @@ $env:PAPERTRADE_LIQUIDATION_EVENTS_PATH="data\\liquidations.json"
 python -m papertrade.cli run-forward --pair BTC/USDT --now-utc 2025-01-11T07:59:00+00:00 --report-dir reports
 ```
 
-SQLite/JSON-backed continuous run:
-
-Simulated multi-cycle run:
-
-```powershell
-$env:PAPERTRADE_RISKY_ARTIFACT_PATH="artifacts\\risky.json"
-$env:PAPERTRADE_SAFE_ARTIFACT_PATH="artifacts\\safe.json"
-$env:PAPERTRADE_PLATFORM_DB_PATH="data\\platform.sqlite3"
-$env:PAPERTRADE_MARKET_STATE_SNAPSHOT_PATH="data\\market_states.json"
-$env:PAPERTRADE_ORDERBOOK_SNAPSHOT_PATH="data\\orderbooks.json"
-$env:PAPERTRADE_LIQUIDATION_EVENTS_PATH="data\\liquidations.json"
-python -m papertrade.cli run-forward --pair BTC/USDT --continuous --now-utc 2025-01-11T07:59:00+00:00 --max-cycles 3 --poll-seconds 0 --report-dir reports
-```
-
-Real-time polling run:
-
-```powershell
-$env:PAPERTRADE_RISKY_ARTIFACT_PATH="artifacts\\risky.json"
-$env:PAPERTRADE_SAFE_ARTIFACT_PATH="artifacts\\safe.json"
-$env:PAPERTRADE_PLATFORM_DB_PATH="data\\platform.sqlite3"
-$env:PAPERTRADE_MARKET_STATE_SNAPSHOT_PATH="data\\market_states.json"
-$env:PAPERTRADE_ORDERBOOK_SNAPSHOT_PATH="data\\orderbooks.json"
-$env:PAPERTRADE_LIQUIDATION_EVENTS_PATH="data\\liquidations.json"
-python -m papertrade.cli run-forward --pair BTC/USDT --continuous --poll-seconds 30 --report-dir reports
-```
-
-All-pairs continuous run from SQLite universe:
-
-```powershell
-$env:PAPERTRADE_RISKY_ARTIFACT_PATH="artifacts\\risky.json"
-$env:PAPERTRADE_SAFE_ARTIFACT_PATH="artifacts\\safe.json"
-$env:PAPERTRADE_PLATFORM_DB_PATH="data\\platform.sqlite3"
-$env:PAPERTRADE_MARKET_STATE_SNAPSHOT_PATH="data\\market_states.json"
-$env:PAPERTRADE_ORDERBOOK_SNAPSHOT_PATH="data\\orderbooks.json"
-$env:PAPERTRADE_LIQUIDATION_EVENTS_PATH="data\\liquidations.json"
-python -m papertrade.cli run-forward --continuous --now-utc 2025-01-11T07:59:00+00:00 --max-cycles 3 --poll-seconds 0 --report-dir reports
-```
-
-Live REST-backed single cycle:
-
-```powershell
-$env:PAPERTRADE_RISKY_ARTIFACT_PATH="artifacts\\risky.json"
-$env:PAPERTRADE_SAFE_ARTIFACT_PATH="artifacts\\safe.json"
-$env:PAPERTRADE_LIVE_PLATFORM_SOURCES="true"
-$env:PAPERTRADE_LIVE_LIQUIDATION_SOURCE="true"
-$env:PAPERTRADE_LIVE_LIQUIDATION_CACHE_PATH="data\\liquidation-cache.json"
-$env:PAPERTRADE_STRICT_LIQUIDATION="true"
-python -m papertrade.cli run-forward --pair BTC/USDT --report-dir reports
-```
-
-Live REST-backed continuous run with strict liquidation:
-
-```powershell
-$env:PAPERTRADE_RISKY_ARTIFACT_PATH="artifacts\\risky.json"
-$env:PAPERTRADE_SAFE_ARTIFACT_PATH="artifacts\\safe.json"
-$env:PAPERTRADE_LIVE_PLATFORM_SOURCES="true"
-$env:PAPERTRADE_LIVE_LIQUIDATION_SOURCE="true"
-$env:PAPERTRADE_LIVE_LIQUIDATION_CACHE_PATH="data\\liquidation-cache.json"
-$env:PAPERTRADE_STRICT_LIQUIDATION="true"
-python -m papertrade.cli run-forward --pair BTC/USDT --continuous --poll-seconds 30 --report-dir reports
-```
-
-Expected local-source files:
-- `platform.sqlite3`
-  - tables: `instruments`, `funding`, `open_interest`
-- `market_states.json`
-  - JSON array of market-state records with `exchange`, `base`, `quote`, `index_price`, `mark_price`, `funding_rate`, `open_interest`, `updated_at`
-- `orderbooks.json`
-  - JSON array of orderbook records with `exchange`, `base`, `quote`, `bids`, `asks`, `updated_at`
-- `liquidations.json`
-  - JSON array of liquidation events with `base`, `quote`, `time`, `usd_size`
-
-Live REST source notes:
-- market state and orderbook are fetched from public Bybit/Bitget REST endpoints at runtime
-- funding and open-interest history are fetched from public Bybit/Bitget REST endpoints at runtime
-- Bybit liquidation is streamed from `wss://stream.bybit.com/v5/public/linear` and cached locally when `PAPERTRADE_LIVE_LIQUIDATION_SOURCE=true`
-- strict liquidation now works on the live path, but the liquidation cache needs a full rolling 8h window before entries become evaluable
-- if the cache is still warming up, the cycle remains non-evaluable with `missing_liquidation_window`
-
 ## Docker
 
-Build image:
+`docker-compose.yml` is configured for standalone SQLite live mode. It writes market data, snapshots, state, and liquidation cache into `/app/data/papertrade.sqlite3`.
 
-```powershell
-docker build -t papertrade:local .
+Run:
+
+```bash
+docker compose up --build
 ```
 
-Run fixture-backed single cycle:
+## Outputs
+
+- `reports/*.md`
+- `reports/runs/*.json`
+- `reports/trades/*.csv`
+- `reports/cycles/*.json`
+
+Cost model:
+
+- `bybit_taker_fee_bps` and `bitget_taker_fee_bps` are configured separately
+- trade-level `fee_bps` is the aggregated roundtrip cost for both legs: `2 * (bybit_taker_fee_bps + bitget_taker_fee_bps)`
+- `slippage_model=top_of_book` estimates entry/exit slippage from top-of-book snapshots, with fixed-bps fallback
+
+## Verification
 
 ```powershell
-docker run --rm `
-  -v ${PWD}\reports:/app/reports `
-  -v ${PWD}\fixtures:/app/fixtures:ro `
-  -v ${PWD}\artifacts:/app/artifacts:ro `
-  -e PAPERTRADE_RISKY_ARTIFACT_PATH=/app/artifacts/risky.json `
-  -e PAPERTRADE_SAFE_ARTIFACT_PATH=/app/artifacts/safe.json `
-  papertrade:local `
-  run-forward `
-  --input-file /app/fixtures/cycle.json `
-  --report-dir /app/reports
+D:\git\papertrade\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Run SQLite/JSON-backed single cycle:
+Current result: `84` tests passing.
 
-```powershell
-docker run --rm `
-  -v ${PWD}\reports:/app/reports `
-  -v ${PWD}\data:/app/data:ro `
-  -v ${PWD}\artifacts:/app/artifacts:ro `
-  -e PAPERTRADE_RISKY_ARTIFACT_PATH=/app/artifacts/risky.json `
-  -e PAPERTRADE_SAFE_ARTIFACT_PATH=/app/artifacts/safe.json `
-  -e PAPERTRADE_PLATFORM_DB_PATH=/app/data/platform.sqlite3 `
-  -e PAPERTRADE_MARKET_STATE_SNAPSHOT_PATH=/app/data/market_states.json `
-  -e PAPERTRADE_ORDERBOOK_SNAPSHOT_PATH=/app/data/orderbooks.json `
-  -e PAPERTRADE_LIQUIDATION_EVENTS_PATH=/app/data/liquidations.json `
-  papertrade:local `
-  run-forward `
-  --pair BTC/USDT `
-  --now-utc 2025-01-11T07:59:00+00:00 `
-  --report-dir /app/reports
-```
+## Remaining Gaps
 
-Output files are written to the host `reports` directory through the mounted volume:
-- `runs/*.json`
-- `trades/*.csv`
-- `cycles/*.json`
-- `*.md`
+- no automated end-to-end test against real exchange endpoints
+- liquidation completeness still depends on the Python websocket/cache, not exchange historical backfill
+- direct exchange REST remains the live market source, so rate-limit behavior still matters in long-running deployments

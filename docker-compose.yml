@@ -1,0 +1,49 @@
+services:
+  papertrade:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: papertrade:latest
+    init: true
+    restart: unless-stopped
+    command:
+      - run-forward
+      - --continuous
+      - --poll-seconds
+      - "${PAPERTRADE_POLL_SECONDS:-30}"
+      - --report-dir
+      - /app/reports
+    environment:
+      PAPERTRADE_SOURCE_MODE: platform_forward
+      PAPERTRADE_RUNTIME_MODE: forward_market_listener
+      PAPERTRADE_STRATEGY: hybrid_aggressive_safe_valid
+      PAPERTRADE_REPORT_OUTPUT_DIR: /app/reports
+      PAPERTRADE_REPORT_FILENAME_PATTERN: "{strategy}__{run_id}__{as_of_round}__{report_type}.md"
+      PAPERTRADE_INITIAL_EQUITY: "${PAPERTRADE_INITIAL_EQUITY:-100}"
+      PAPERTRADE_NOTIONAL_PCT: "${PAPERTRADE_NOTIONAL_PCT:-0.01}"
+      PAPERTRADE_BYBIT_TAKER_FEE_BPS: "${PAPERTRADE_BYBIT_TAKER_FEE_BPS:-6}"
+      PAPERTRADE_BITGET_TAKER_FEE_BPS: "${PAPERTRADE_BITGET_TAKER_FEE_BPS:-6}"
+      PAPERTRADE_SLIPPAGE_BPS: "${PAPERTRADE_SLIPPAGE_BPS:-4}"
+      PAPERTRADE_SLIPPAGE_MODEL: "${PAPERTRADE_SLIPPAGE_MODEL:-top_of_book}"
+      PAPERTRADE_DECISION_BUFFER_SECONDS: "${PAPERTRADE_DECISION_BUFFER_SECONDS:-30}"
+      PAPERTRADE_MARKET_STATE_STALENESS_SECONDS: "${PAPERTRADE_MARKET_STATE_STALENESS_SECONDS:-120}"
+      PAPERTRADE_ORDERBOOK_STALENESS_SECONDS: "${PAPERTRADE_ORDERBOOK_STALENESS_SECONDS:-15}"
+      PAPERTRADE_STRICT_LIQUIDATION: "${PAPERTRADE_STRICT_LIQUIDATION:-true}"
+      PAPERTRADE_OPEN_INTEREST_MODE: "${PAPERTRADE_OPEN_INTEREST_MODE:-raw}"
+      PAPERTRADE_RISKY_ARTIFACT_PATH: /app/artifacts/risky.json
+      PAPERTRADE_SAFE_ARTIFACT_PATH: /app/artifacts/safe.json
+      PAPERTRADE_PLATFORM_DB_PATH: /app/data/papertrade.sqlite3
+      PAPERTRADE_STATE_DB_PATH: /app/data/papertrade.sqlite3
+      PAPERTRADE_LIVE_PLATFORM_SOURCES: "${PAPERTRADE_LIVE_PLATFORM_SOURCES:-true}"
+      PAPERTRADE_LIVE_LIQUIDATION_SOURCE: "${PAPERTRADE_LIVE_LIQUIDATION_SOURCE:-true}"
+      PAPERTRADE_BYBIT_REST_BASE_URL: "${PAPERTRADE_BYBIT_REST_BASE_URL:-https://api.bybit.com}"
+      PAPERTRADE_BITGET_REST_BASE_URL: "${PAPERTRADE_BITGET_REST_BASE_URL:-https://api.bitget.com}"
+      PAPERTRADE_BYBIT_LIQUIDATION_WS_URL: "${PAPERTRADE_BYBIT_LIQUIDATION_WS_URL:-wss://stream.bybit.com/v5/public/linear}"
+      PAPERTRADE_LIVE_LIQUIDATION_CACHE_PATH: /app/data/liquidation-cache.json
+    volumes:
+      - papertrade-data:/app/data
+      - papertrade-reports:/app/reports
+
+volumes:
+  papertrade-data:
+  papertrade-reports:

@@ -7,7 +7,9 @@ WORKDIR /app
 
 COPY pyproject.toml README.md /app/
 COPY src /app/src
+COPY artifacts /app/artifacts
 
 RUN pip install --no-cache-dir .
+RUN mkdir -p /app/data /app/reports
 
 ENTRYPOINT ["papertrade"]

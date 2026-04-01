@@ -8,6 +8,5 @@ __pycache__
 .mypy_cache
 reports
 data
-artifacts
 fixtures
 tests

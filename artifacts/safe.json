@@ -1,0 +1,45 @@
+{
+  "name": "safe_plus_secondary_hybrid_aggressive_safe_valid",
+  "feature_order": [
+    "bybit_premium_bps",
+    "premium_abs_gap_bps",
+    "bitget_futures_premium_bps",
+    "bybit_open_interest",
+    "oi_gap",
+    "oi_total",
+    "book_imbalance_abs_gap",
+    "bybit_liquidation_amount_8h"
+  ],
+  "means": {
+    "bybit_premium_bps": "4.048322",
+    "premium_abs_gap_bps": "15.913475",
+    "bitget_futures_premium_bps": "-3.530992",
+    "bybit_open_interest": "298776104.842857",
+    "oi_gap": "221516152.646429",
+    "oi_total": "376036057.039286",
+    "book_imbalance_abs_gap": "0.788573",
+    "bybit_liquidation_amount_8h": "33502.832143"
+  },
+  "stds": {
+    "bybit_premium_bps": "18.101405",
+    "premium_abs_gap_bps": "21.486006",
+    "bitget_futures_premium_bps": "32.164206",
+    "bybit_open_interest": "680631058.433402",
+    "oi_gap": "527361308.065865",
+    "oi_total": "838416735.003874",
+    "book_imbalance_abs_gap": "0.534837",
+    "bybit_liquidation_amount_8h": "63557.328682"
+  },
+  "weights": {
+    "bybit_premium_bps": "-3.314778",
+    "premium_abs_gap_bps": "3.289779",
+    "bitget_futures_premium_bps": "-2.326097",
+    "bybit_open_interest": "-0.055848",
+    "oi_gap": "-0.135742",
+    "oi_total": "-0.005294",
+    "book_imbalance_abs_gap": "1.915364",
+    "bybit_liquidation_amount_8h": "-1.972222"
+  },
+  "bias": "-1.734095",
+  "threshold": "0.151704"
+}

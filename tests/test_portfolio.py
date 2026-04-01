@@ -15,6 +15,8 @@ def make_run(
     initial_equity: Decimal = Decimal("100"),
     notional_pct: Decimal = Decimal("0.01"),
     fee_bps: Decimal = Decimal("4"),
+    bybit_taker_fee_bps: Decimal | None = None,
+    bitget_taker_fee_bps: Decimal | None = None,
     slippage_bps: Decimal = Decimal("4"),
 ) -> PaperRun:
     return PaperRun.new(
@@ -25,12 +27,14 @@ def make_run(
         report_filename_pattern="{strategy}__{run_id}__{as_of_round}__{report_type}.md",
         initial_equity=initial_equity,
         notional_pct=notional_pct,
-        fee_bps=fee_bps,
         slippage_bps=slippage_bps,
         decision_buffer_seconds=30,
         market_state_staleness_sec=120,
         orderbook_staleness_sec=15,
         strict_liquidation=True,
+        fee_bps=fee_bps,
+        bybit_taker_fee_bps=bybit_taker_fee_bps,
+        bitget_taker_fee_bps=bitget_taker_fee_bps,
     )
 
 
@@ -212,3 +216,71 @@ class PortfolioTests(unittest.TestCase):
         self.assertEqual(simulator.run.current_equity, Decimal("90"))
         self.assertEqual(simulator.run.peak_equity, Decimal("100"))
         self.assertEqual(simulator.run.max_drawdown_pct, Decimal("10"))
+
+    def test_close_completed_accumulates_entry_and_exit_slippage_bps(self) -> None:
+        simulator = PortfolioSimulator(run=make_run(slippage_bps=Decimal("4")))
+        scheduler = RoundScheduler()
+        position = simulator.open_position(
+            decision=make_decision(),
+            entry_time=datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc),
+            planned_exit_round=scheduler.exit_round(datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc)),
+            entry_slippage_bps=Decimal("2.5"),
+        )
+
+        simulator.settle_round(
+            position_id=position.position_id,
+            funding_round=datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc),
+            bybit_funding_rate_bps=Decimal("5"),
+            bitget_funding_rate_bps=Decimal("2"),
+        )
+        simulator.settle_round(
+            position_id=position.position_id,
+            funding_round=datetime(2025, 1, 11, 16, 0, tzinfo=timezone.utc),
+            bybit_funding_rate_bps=Decimal("4"),
+            bitget_funding_rate_bps=Decimal("1"),
+        )
+        final_position = simulator.settle_round(
+            position_id=position.position_id,
+            funding_round=datetime(2025, 1, 12, 0, 0, tzinfo=timezone.utc),
+            bybit_funding_rate_bps=Decimal("3"),
+            bitget_funding_rate_bps=Decimal("1"),
+            exit_slippage_bps=Decimal("1.5"),
+        )
+
+        self.assertEqual(final_position.slippage_bps, Decimal("4.0"))
+
+    def test_close_completed_uses_exchange_specific_roundtrip_fee_bps(self) -> None:
+        simulator = PortfolioSimulator(
+            run=make_run(
+                bybit_taker_fee_bps=Decimal("5.5"),
+                bitget_taker_fee_bps=Decimal("6"),
+                slippage_bps=Decimal("0"),
+            )
+        )
+        scheduler = RoundScheduler()
+        position = simulator.open_position(
+            decision=make_decision(),
+            entry_time=datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc),
+            planned_exit_round=scheduler.exit_round(datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc)),
+        )
+
+        simulator.settle_round(
+            position_id=position.position_id,
+            funding_round=datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc),
+            bybit_funding_rate_bps=Decimal("0"),
+            bitget_funding_rate_bps=Decimal("0"),
+        )
+        simulator.settle_round(
+            position_id=position.position_id,
+            funding_round=datetime(2025, 1, 11, 16, 0, tzinfo=timezone.utc),
+            bybit_funding_rate_bps=Decimal("0"),
+            bitget_funding_rate_bps=Decimal("0"),
+        )
+        final_position = simulator.settle_round(
+            position_id=position.position_id,
+            funding_round=datetime(2025, 1, 12, 0, 0, tzinfo=timezone.utc),
+            bybit_funding_rate_bps=Decimal("0"),
+            bitget_funding_rate_bps=Decimal("0"),
+        )
+
+        self.assertEqual(final_position.fee_bps, Decimal("23.0"))

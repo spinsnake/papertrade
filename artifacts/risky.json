@@ -1,0 +1,25 @@
+{
+  "name": "risky_benchmark_hybrid_aggressive_safe_valid",
+  "feature_order": [
+    "current_abs_funding_spread_bps",
+    "rolling3_mean_abs_funding_spread_bps",
+    "lag1_current_abs_funding_spread_bps"
+  ],
+  "means": {
+    "current_abs_funding_spread_bps": "0.970875",
+    "rolling3_mean_abs_funding_spread_bps": "0.923620",
+    "lag1_current_abs_funding_spread_bps": "0.928912"
+  },
+  "stds": {
+    "current_abs_funding_spread_bps": "3.373191",
+    "rolling3_mean_abs_funding_spread_bps": "3.187954",
+    "lag1_current_abs_funding_spread_bps": "3.307017"
+  },
+  "weights": {
+    "current_abs_funding_spread_bps": "1.213350",
+    "rolling3_mean_abs_funding_spread_bps": "0.216117",
+    "lag1_current_abs_funding_spread_bps": "0.375313"
+  },
+  "bias": "-5.092596",
+  "threshold": "0.2071180075"
+}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import tempfile
+from unittest.mock import patch
 import unittest
 
 from papertrade.config import Settings
@@ -93,3 +94,48 @@ class RuntimeTests(unittest.TestCase):
 
         self.assertEqual(status, "blocked")
         self.assertEqual(reason, "missing_platform_db_source")
+
+    def test_resolve_runtime_availability_detects_standalone_sqlite_live_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "papertrade.sqlite3"
+            settings = Settings(
+                live_platform_sources=True,
+                platform_db_path=db_path,
+            )
+
+            availability = resolve_runtime_availability(settings)
+
+        self.assertTrue(availability.has_platform_db_source)
+        self.assertTrue(availability.has_platform_bridge_source)
+        self.assertTrue(availability.has_platform_snapshot_source)
+        self.assertEqual(availability.platform_source_kind, "standalone_sqlite_live")
+
+    def test_resolve_runtime_availability_prefers_platform_postgres_source(self) -> None:
+        settings = Settings(
+            platform_postgres_dsn="postgres://platform",
+        )
+
+        with patch("papertrade.runtime.PostgresPlatformDBSource.ping", return_value=None), patch(
+            "papertrade.runtime.PostgresFundingRoundSnapshotSource.ping",
+            return_value=None,
+        ):
+            availability = resolve_runtime_availability(settings)
+
+        self.assertTrue(availability.has_platform_db_source)
+        self.assertTrue(availability.has_platform_snapshot_source)
+        self.assertFalse(availability.has_platform_bridge_source)
+        self.assertEqual(availability.platform_source_kind, "platform_postgres")
+
+    def test_preflight_live_source_status_runs_when_platform_snapshot_source_is_ready(self) -> None:
+        status, reason = preflight_live_source_status(
+            RuntimeAvailability(
+                has_liquidation_source=True,
+                has_model_artifacts=True,
+                has_platform_db_source=True,
+                has_platform_bridge_source=False,
+                has_platform_snapshot_source=True,
+            )
+        )
+
+        self.assertEqual(status, "running")
+        self.assertEqual(reason, "ok")

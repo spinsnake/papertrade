@@ -5,9 +5,11 @@ from datetime import timedelta
 from decimal import Decimal
 
 from .contracts import FundingRoundSnapshot, MarketState, Orderbook, Pair
+from .normalization import normalize_open_interest
 from .scheduler import FundingDecision
 from .sources.liquidation import LiquidationSource
 from .sources.platform_bridge import PlatformBridgeSource
+from .sources.platform_db import PlatformDBSource
 
 
 BPS_MULTIPLIER = Decimal("10000")
@@ -16,9 +18,11 @@ BPS_MULTIPLIER = Decimal("10000")
 @dataclass(frozen=True)
 class SnapshotCollector:
     bridge: PlatformBridgeSource
+    platform_db_source: PlatformDBSource | None = None
     liquidation_source: LiquidationSource | None = None
     market_state_staleness_seconds: int = 120
     orderbook_staleness_seconds: int = 15
+    open_interest_mode: str = "raw"
 
     def __post_init__(self) -> None:
         if self.market_state_staleness_seconds <= 0:
@@ -57,7 +61,12 @@ class SnapshotCollector:
             funding_rate_bps = market_state.funding_rate * BPS_MULTIPLIER
             mark_price = market_state.mark_price
             index_price = market_state.index_price
-            open_interest = market_state.open_interest
+            open_interest = self._normalize_open_interest(
+                exchange=exchange,
+                pair=pair,
+                raw_open_interest=market_state.open_interest,
+                mark_price=market_state.mark_price,
+            )
             market_state_observed_at = market_state.updated_at
 
         bid_price = None
@@ -180,3 +189,21 @@ class SnapshotCollector:
             except Exception:
                 return None, False
         return amount, complete
+
+    def _normalize_open_interest(
+        self,
+        *,
+        exchange: str,
+        pair: Pair,
+        raw_open_interest: Decimal,
+        mark_price: Decimal | None,
+    ) -> Decimal:
+        instrument = None
+        if self.platform_db_source is not None:
+            instrument = self.platform_db_source.get_instrument(pair, exchange)
+        return normalize_open_interest(
+            raw_open_interest,
+            instrument=instrument,
+            mark_price=mark_price,
+            mode=self.open_interest_mode,
+        )

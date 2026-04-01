@@ -104,7 +104,7 @@ class FilePlatformBridge:
 
 
 @dataclass(frozen=True)
-class LiveHttpPlatformBridge:
+class ExchangeRestPlatformBridge:
     bybit_base_url: str = "https://api.bybit.com"
     bitget_base_url: str = "https://api.bitget.com"
     http_client: HttpJsonClient = HttpJsonClient()
@@ -284,3 +284,6 @@ def _bitget_product_type(pair: Pair) -> str:
     if pair.quote == "USDT":
         return "USDT-FUTURES"
     raise ValueError("bitget live bridge currently supports only USDT-margined pairs")
+
+
+LiveHttpPlatformBridge = ExchangeRestPlatformBridge

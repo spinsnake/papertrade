@@ -48,7 +48,7 @@ def make_open_interest(*, exchange: str, pair: Pair, hour: int, value: str) -> O
 
 
 class InMemoryPlatformDBSourceTests(unittest.TestCase):
-    def test_list_pairs_returns_unique_eight_hour_pairs_in_insertion_order(self) -> None:
+    def test_list_pairs_returns_pairs_present_on_both_exchanges_with_eight_hour_funding(self) -> None:
         btc = Pair("BTC", "USDT")
         eth = Pair("ETH", "USDT")
         source = InMemoryPlatformDBSource()
@@ -59,7 +59,7 @@ class InMemoryPlatformDBSourceTests(unittest.TestCase):
 
         pairs = source.list_pairs()
 
-        self.assertEqual(pairs, (btc, eth))
+        self.assertEqual(pairs, (btc,))
 
     def test_load_funding_history_filters_by_pair_and_exchange_and_sorts_latest_first(self) -> None:
         btc = Pair("BTC", "USDT")
