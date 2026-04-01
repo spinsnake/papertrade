@@ -154,6 +154,8 @@ Cost model:
 Trade log column meanings:
 
 - `gross_bps` = funding 3 rounds combined
+- `round1_gross_bps`, `round2_gross_bps`, `round3_gross_bps` = realized funding spread per round in bps
+- `round1_gross_pnl`, `round2_gross_pnl`, `round3_gross_pnl` = realized funding amount per round on the trade notional
 - `bybit_fee_bps` = Bybit taker fee roundtrip cost
 - `bitget_fee_bps` = Bitget taker fee roundtrip cost
 - `fee_bps` = total fee cost across both exchanges

@@ -106,6 +106,12 @@ class PortfolioTests(unittest.TestCase):
         self.assertIs(final_position.state, PositionState.CLOSED)
         self.assertEqual(final_position.close_reason, "completed_three_rounds")
         self.assertEqual(len(simulator.trades), 1)
+        self.assertEqual(simulator.trades[0].round1_gross_bps, Decimal("3"))
+        self.assertEqual(simulator.trades[0].round2_gross_bps, Decimal("3"))
+        self.assertEqual(simulator.trades[0].round3_gross_bps, Decimal("2"))
+        self.assertEqual(simulator.trades[0].round1_gross_pnl, Decimal("0.0003"))
+        self.assertEqual(simulator.trades[0].round2_gross_pnl, Decimal("0.0003"))
+        self.assertEqual(simulator.trades[0].round3_gross_pnl, Decimal("0.0002"))
 
     def test_settlement_error_when_funding_missing_at_round2(self) -> None:
         simulator = PortfolioSimulator(run=make_run())

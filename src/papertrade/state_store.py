@@ -292,10 +292,11 @@ class SQLiteStateStore:
                         trade_id, run_id, position_id, strategy, base, quote, symbol,
                         short_exchange, long_exchange, entry_round, exit_round, entry_time,
                         exit_time, rounds_held, entry_safe_score, entry_risky_score, notional,
-                        gross_bps, bybit_fee_bps, bitget_fee_bps, fee_bps, slippage_bps, net_bps,
-                        gross_pnl, fee_pnl, slippage_pnl, net_pnl, equity_before, equity_after,
-                        close_reason
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        gross_bps, round1_gross_bps, round2_gross_bps, round3_gross_bps,
+                        round1_gross_pnl, round2_gross_pnl, round3_gross_pnl, bybit_fee_bps,
+                        bitget_fee_bps, fee_bps, slippage_bps, net_bps, gross_pnl, fee_pnl,
+                        slippage_pnl, net_pnl, equity_before, equity_after, close_reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         trade.trade_id,
@@ -316,6 +317,12 @@ class SQLiteStateStore:
                         str(trade.entry_risky_score),
                         str(trade.notional),
                         str(trade.gross_bps),
+                        _str_or_none(trade.round1_gross_bps),
+                        _str_or_none(trade.round2_gross_bps),
+                        _str_or_none(trade.round3_gross_bps),
+                        _str_or_none(trade.round1_gross_pnl),
+                        _str_or_none(trade.round2_gross_pnl),
+                        _str_or_none(trade.round3_gross_pnl),
                         str(trade.bybit_fee_bps),
                         str(trade.bitget_fee_bps),
                         str(trade.fee_bps),
@@ -403,14 +410,37 @@ class SQLiteStateStore:
     def load_trades(self, run_id: str) -> list[PaperTrade]:
         with closing(self._connect()) as connection:
             run_row = connection.execute("SELECT * FROM paper_runs WHERE run_id = ?", (run_id,)).fetchone()
+            round_rows = connection.execute(
+                """
+                SELECT *
+                FROM paper_position_rounds
+                WHERE position_id IN (SELECT position_id FROM paper_positions WHERE run_id = ?)
+                ORDER BY round_no ASC, funding_round ASC
+                """,
+                (run_id,),
+            ).fetchall()
             rows = connection.execute(
                 "SELECT * FROM paper_trades WHERE run_id = ? ORDER BY entry_round ASC, trade_id ASC",
                 (run_id,),
             ).fetchall()
         run = self._run_from_row(run_row) if run_row is not None else None
+        rounds_by_position: dict[str, list[PaperPositionRound]] = {}
+        for round_row in round_rows:
+            rounds_by_position.setdefault(str(round_row["position_id"]), []).append(
+                PaperPositionRound(
+                    funding_round=_parse_dt(round_row["funding_round"]),
+                    round_no=int(round_row["round_no"]),
+                    bybit_funding_rate_bps=_dec(round_row["bybit_funding_rate_bps"]),
+                    bitget_funding_rate_bps=_dec(round_row["bitget_funding_rate_bps"]),
+                    realized_round_gross_bps=_dec(round_row["realized_round_gross_bps"]),
+                    settlement_evaluable=_bool(round_row["settlement_evaluable"]),
+                    reason_code=str(round_row["reason_code"]),
+                )
+            )
         trades: list[PaperTrade] = []
         for row in rows:
             fee_bps = _dec(row["fee_bps"]) or Decimal("0")
+            notional = _dec(row["notional"]) or Decimal("0")
             bybit_fee_bps = (
                 _dec(row["bybit_fee_bps"])
                 if "bybit_fee_bps" in row.keys()
@@ -434,6 +464,28 @@ class SQLiteStateStore:
                     bybit_fee_bps = remaining_fee_bps
                 if bitget_fee_bps is None:
                     bitget_fee_bps = remaining_fee_bps
+            round_gross_bps = [
+                _dec(row[column_name]) if column_name in row.keys() else None
+                for column_name in ("round1_gross_bps", "round2_gross_bps", "round3_gross_bps")
+            ]
+            position_rounds = rounds_by_position.get(str(row["position_id"]), [])
+            if all(round_value is None for round_value in round_gross_bps) and position_rounds:
+                derived_round_gross_bps = [
+                    round_.realized_round_gross_bps
+                    for round_ in sorted(position_rounds, key=lambda round_: round_.round_no)[:3]
+                ]
+                while len(derived_round_gross_bps) < 3:
+                    derived_round_gross_bps.append(None)
+                round_gross_bps = derived_round_gross_bps
+            round_gross_pnls = [
+                _dec(row[column_name]) if column_name in row.keys() else None
+                for column_name in ("round1_gross_pnl", "round2_gross_pnl", "round3_gross_pnl")
+            ]
+            if all(round_value is None for round_value in round_gross_pnls):
+                round_gross_pnls = [
+                    (notional * round_bps / Decimal("10000")) if round_bps is not None else None
+                    for round_bps in round_gross_bps
+                ]
             trades.append(
                 PaperTrade(
                     trade_id=str(row["trade_id"]),
@@ -450,8 +502,14 @@ class SQLiteStateStore:
                     rounds_held=int(row["rounds_held"]),
                     entry_safe_score=_dec(row["entry_safe_score"]) or Decimal("0"),
                     entry_risky_score=_dec(row["entry_risky_score"]) or Decimal("0"),
-                    notional=_dec(row["notional"]) or Decimal("0"),
+                    notional=notional,
                     gross_bps=_dec(row["gross_bps"]) or Decimal("0"),
+                    round1_gross_bps=round_gross_bps[0],
+                    round2_gross_bps=round_gross_bps[1],
+                    round3_gross_bps=round_gross_bps[2],
+                    round1_gross_pnl=round_gross_pnls[0],
+                    round2_gross_pnl=round_gross_pnls[1],
+                    round3_gross_pnl=round_gross_pnls[2],
                     bybit_fee_bps=bybit_fee_bps,
                     bitget_fee_bps=bitget_fee_bps,
                     fee_bps=fee_bps,
@@ -611,6 +669,12 @@ class SQLiteStateStore:
                     entry_risky_score TEXT NOT NULL,
                     notional TEXT NOT NULL,
                     gross_bps TEXT NOT NULL,
+                    round1_gross_bps TEXT NULL,
+                    round2_gross_bps TEXT NULL,
+                    round3_gross_bps TEXT NULL,
+                    round1_gross_pnl TEXT NULL,
+                    round2_gross_pnl TEXT NULL,
+                    round3_gross_pnl TEXT NULL,
                     bybit_fee_bps TEXT NULL,
                     bitget_fee_bps TEXT NULL,
                     fee_bps TEXT NOT NULL,
@@ -640,6 +704,12 @@ class SQLiteStateStore:
             )
             self._ensure_column(connection, "paper_runs", "bybit_taker_fee_bps", "TEXT NULL")
             self._ensure_column(connection, "paper_runs", "bitget_taker_fee_bps", "TEXT NULL")
+            self._ensure_column(connection, "paper_trades", "round1_gross_bps", "TEXT NULL")
+            self._ensure_column(connection, "paper_trades", "round2_gross_bps", "TEXT NULL")
+            self._ensure_column(connection, "paper_trades", "round3_gross_bps", "TEXT NULL")
+            self._ensure_column(connection, "paper_trades", "round1_gross_pnl", "TEXT NULL")
+            self._ensure_column(connection, "paper_trades", "round2_gross_pnl", "TEXT NULL")
+            self._ensure_column(connection, "paper_trades", "round3_gross_pnl", "TEXT NULL")
             self._ensure_column(connection, "paper_trades", "bybit_fee_bps", "TEXT NULL")
             self._ensure_column(connection, "paper_trades", "bitget_fee_bps", "TEXT NULL")
             connection.commit()

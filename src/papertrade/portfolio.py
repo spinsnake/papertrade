@@ -134,6 +134,16 @@ class PortfolioSimulator:
         *,
         exit_slippage_bps: Decimal | None,
     ) -> None:
+        round_gross_bps = [
+            round_.realized_round_gross_bps
+            for round_ in position.rounds[:3]
+        ]
+        while len(round_gross_bps) < 3:
+            round_gross_bps.append(None)
+        round_gross_pnls = [
+            (position.notional * round_bps / Decimal("10000")) if round_bps is not None else None
+            for round_bps in round_gross_bps
+        ]
         gross_bps = sum((round_.realized_round_gross_bps or Decimal("0")) for round_ in position.rounds)
         bybit_fee_bps = self.run.bybit_taker_fee_bps * Decimal("2")
         bitget_fee_bps = self.run.bitget_taker_fee_bps * Decimal("2")
@@ -193,6 +203,12 @@ class PortfolioSimulator:
                 entry_risky_score=position.entry_risky_score,
                 notional=position.notional,
                 gross_bps=gross_bps,
+                round1_gross_bps=round_gross_bps[0],
+                round2_gross_bps=round_gross_bps[1],
+                round3_gross_bps=round_gross_bps[2],
+                round1_gross_pnl=round_gross_pnls[0],
+                round2_gross_pnl=round_gross_pnls[1],
+                round3_gross_pnl=round_gross_pnls[2],
                 bybit_fee_bps=bybit_fee_bps,
                 bitget_fee_bps=bitget_fee_bps,
                 fee_bps=fee_bps,
