@@ -151,13 +151,22 @@ Cost model:
 - trade-level `fee_bps` is the aggregated roundtrip cost for both legs: `2 * (bybit_taker_fee_bps + bitget_taker_fee_bps)`
 - `slippage_model=top_of_book` estimates entry/exit slippage from top-of-book snapshots, with fixed-bps fallback
 
+Trade log column meanings:
+
+- `gross_bps` = funding 3 rounds combined
+- `bybit_fee_bps` = Bybit taker fee roundtrip cost
+- `bitget_fee_bps` = Bitget taker fee roundtrip cost
+- `fee_bps` = total fee cost across both exchanges
+- `slippage_bps` = slippage model estimate
+- `net_bps` = `gross_bps - fee_bps - slippage_bps`
+
 ## Verification
 
 ```powershell
 D:\git\papertrade\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Current result: `84` tests passing.
+Current result: `85` tests passing.
 
 ## Remaining Gaps
 
