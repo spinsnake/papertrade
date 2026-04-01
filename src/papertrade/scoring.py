@@ -68,3 +68,14 @@ def compute_scores(
     feature.safe_logit = safe_logit
     feature.safe_score = safe_score
     return feature
+
+
+def load_artifact_pair(
+    *,
+    risky_artifact_path: str | Path,
+    safe_artifact_path: str | Path,
+) -> tuple[LogisticArtifact, LogisticArtifact]:
+    return (
+        LogisticArtifact.from_json(risky_artifact_path),
+        LogisticArtifact.from_json(safe_artifact_path),
+    )

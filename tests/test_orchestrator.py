@@ -5,7 +5,11 @@ from decimal import Decimal
 import unittest
 
 from papertrade.contracts import FundingRoundSnapshot, Pair
-from papertrade.orchestrator import SingleCycleInput, build_default_orchestrator
+from papertrade.orchestrator import (
+    SingleCycleInput,
+    build_artifact_backed_orchestrator,
+    build_default_orchestrator,
+)
 from papertrade.scoring import LogisticArtifact
 
 
@@ -269,3 +273,66 @@ class OrchestratorTests(unittest.TestCase):
                     ),
                 )
             )
+
+    def test_artifact_backed_orchestrator_uses_artifact_thresholds(self) -> None:
+        risky_artifact = make_risky_artifact()
+        safe_artifact = LogisticArtifact.from_dict(
+            {
+                "name": "safe",
+                "feature_order": [
+                    "bybit_premium_bps",
+                    "premium_abs_gap_bps",
+                    "bitget_futures_premium_bps",
+                    "bybit_open_interest",
+                    "oi_gap",
+                    "oi_total",
+                    "book_imbalance_abs_gap",
+                    "bybit_liquidation_amount_8h",
+                ],
+                "means": {
+                    "bybit_premium_bps": "0",
+                    "premium_abs_gap_bps": "0",
+                    "bitget_futures_premium_bps": "0",
+                    "bybit_open_interest": "0",
+                    "oi_gap": "0",
+                    "oi_total": "0",
+                    "book_imbalance_abs_gap": "0",
+                    "bybit_liquidation_amount_8h": "0",
+                },
+                "stds": {
+                    "bybit_premium_bps": "1",
+                    "premium_abs_gap_bps": "1",
+                    "bitget_futures_premium_bps": "1",
+                    "bybit_open_interest": "100",
+                    "oi_gap": "10",
+                    "oi_total": "100",
+                    "book_imbalance_abs_gap": "1",
+                    "bybit_liquidation_amount_8h": "1",
+                },
+                "weights": {
+                    "bybit_premium_bps": "1",
+                    "premium_abs_gap_bps": "1",
+                    "bitget_futures_premium_bps": "1",
+                    "bybit_open_interest": "1",
+                    "oi_gap": "1",
+                    "oi_total": "1",
+                    "book_imbalance_abs_gap": "1",
+                    "bybit_liquidation_amount_8h": "1",
+                },
+                "bias": "0",
+                "threshold": "1.1",
+            }
+        )
+
+        result = build_artifact_backed_orchestrator(
+            risky_artifact=risky_artifact,
+            safe_artifact=safe_artifact,
+        ).evaluate(
+            make_input(
+                risky_artifact=risky_artifact,
+                safe_artifact=safe_artifact,
+            )
+        )
+
+        self.assertFalse(result.decision.selected)
+        self.assertEqual(result.decision.reason_code, "below_safe_threshold")

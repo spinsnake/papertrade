@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+import json
+from pathlib import Path
+import tempfile
 import unittest
 
 from papertrade.contracts import FeatureSnapshot, Pair
-from papertrade.scoring import LogisticArtifact, compute_scores
+from papertrade.scoring import LogisticArtifact, compute_scores, load_artifact_pair
 
 
 class ScoringTests(unittest.TestCase):
@@ -107,3 +110,38 @@ class ScoringTests(unittest.TestCase):
         self.assertIsNotNone(scored.safe_score)
         self.assertIsNotNone(scored.risky_logit)
         self.assertIsNotNone(scored.safe_logit)
+
+    def test_load_artifact_pair_reads_json_files(self) -> None:
+        risky_payload = {
+            "name": "risky",
+            "feature_order": ["current_abs_funding_spread_bps"],
+            "means": {"current_abs_funding_spread_bps": "0"},
+            "stds": {"current_abs_funding_spread_bps": "1"},
+            "weights": {"current_abs_funding_spread_bps": "1"},
+            "bias": "0",
+            "threshold": "0.2",
+        }
+        safe_payload = {
+            "name": "safe",
+            "feature_order": ["bybit_premium_bps"],
+            "means": {"bybit_premium_bps": "0"},
+            "stds": {"bybit_premium_bps": "1"},
+            "weights": {"bybit_premium_bps": "1"},
+            "bias": "0",
+            "threshold": "0.3",
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            risky_path = Path(tmpdir) / "risky.json"
+            safe_path = Path(tmpdir) / "safe.json"
+            risky_path.write_text(json.dumps(risky_payload), encoding="utf-8")
+            safe_path.write_text(json.dumps(safe_payload), encoding="utf-8")
+
+            risky, safe = load_artifact_pair(
+                risky_artifact_path=risky_path,
+                safe_artifact_path=safe_path,
+            )
+
+        self.assertEqual(risky.name, "risky")
+        self.assertEqual(risky.threshold, Decimal("0.2"))
+        self.assertEqual(safe.name, "safe")
+        self.assertEqual(safe.threshold, Decimal("0.3"))

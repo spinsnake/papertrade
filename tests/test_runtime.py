@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 import unittest
 
 from papertrade.config import Settings
@@ -35,10 +36,17 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(reason, "missing_model_artifact")
 
     def test_resolve_runtime_availability_detects_configured_artifacts(self) -> None:
-        settings = Settings(
-            risky_artifact_path=Path("artifacts/risky.json"),
-            safe_artifact_path=Path("artifacts/safe.json"),
-        )
-        availability = resolve_runtime_availability(settings)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            risky_path = Path(tmpdir) / "risky.json"
+            safe_path = Path(tmpdir) / "safe.json"
+            risky_path.write_text("{}", encoding="utf-8")
+            safe_path.write_text("{}", encoding="utf-8")
+
+            settings = Settings(
+                risky_artifact_path=risky_path,
+                safe_artifact_path=safe_path,
+            )
+            availability = resolve_runtime_availability(settings)
+
         self.assertTrue(availability.has_model_artifacts)
         self.assertFalse(availability.has_liquidation_source)

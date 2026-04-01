@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from .contracts import EntryDecision, FeatureSnapshot
+from .scoring import LogisticArtifact
 
 
 SAFE_THRESHOLD = Decimal("0.151704")
@@ -20,6 +21,18 @@ def direction_from_spread(signed_spread_bps: Decimal) -> tuple[str, str]:
 class RuleEvaluator:
     safe_threshold: Decimal = SAFE_THRESHOLD
     risky_threshold: Decimal = RISKY_THRESHOLD
+
+    @classmethod
+    def from_artifacts(
+        cls,
+        *,
+        risky_artifact: LogisticArtifact,
+        safe_artifact: LogisticArtifact,
+    ) -> "RuleEvaluator":
+        return cls(
+            safe_threshold=safe_artifact.threshold,
+            risky_threshold=risky_artifact.threshold,
+        )
 
     def evaluate_entry(self, feature: FeatureSnapshot, has_open_position: bool) -> EntryDecision:
         if has_open_position:

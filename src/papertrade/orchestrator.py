@@ -89,3 +89,18 @@ def build_default_orchestrator() -> SingleCycleOrchestrator:
         feature_builder=FeatureBuilder(),
         rule_evaluator=RuleEvaluator(),
     )
+
+
+def build_artifact_backed_orchestrator(
+    *,
+    risky_artifact: LogisticArtifact,
+    safe_artifact: LogisticArtifact,
+) -> SingleCycleOrchestrator:
+    return SingleCycleOrchestrator(
+        scheduler=RoundScheduler(),
+        feature_builder=FeatureBuilder(),
+        rule_evaluator=RuleEvaluator.from_artifacts(
+            risky_artifact=risky_artifact,
+            safe_artifact=safe_artifact,
+        ),
+    )
