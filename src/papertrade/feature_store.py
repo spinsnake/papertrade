@@ -15,6 +15,7 @@ def _premium_bps(mark_price: Decimal, index_price: Decimal) -> Decimal:
 @dataclass(frozen=True)
 class FeatureBuilder:
     strategy: str = "hybrid_aggressive_safe_valid"
+    require_complete_liquidation: bool = False
 
     def build(
         self,
@@ -51,6 +52,8 @@ class FeatureBuilder:
             return FeatureSnapshot(funding_round, self.strategy, pair, False, "missing_market_data")
         if lag1_abs_spread_bps is None or rolling3_mean_abs_spread_bps is None:
             return FeatureSnapshot(funding_round, self.strategy, pair, False, "missing_lag_history")
+        if self.require_complete_liquidation and not bybit_snapshot.liquidation_complete:
+            return FeatureSnapshot(funding_round, self.strategy, pair, False, "missing_liquidation_window")
 
         assert bybit_snapshot.funding_rate_bps is not None
         assert bitget_snapshot.funding_rate_bps is not None

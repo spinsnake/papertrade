@@ -8,6 +8,7 @@ from papertrade.config import Settings
 from papertrade.contracts import Pair
 from papertrade.runtime import resolve_runtime_availability
 from papertrade.single_cycle_runtime import load_configured_single_cycle_sources
+from papertrade.sources.liquidation import BybitLiveLiquidationSource
 from papertrade.sources.platform_bridge import LiveHttpPlatformBridge
 from papertrade.sources.platform_db import LivePlatformDBSource
 
@@ -240,6 +241,7 @@ class LiveSourceAdapterTests(unittest.TestCase):
     def test_live_settings_enable_runtime_availability_and_source_bundle(self) -> None:
         settings = Settings(
             live_platform_sources=True,
+            live_liquidation_source=True,
             bybit_rest_base_url="https://api.bybit.com",
             bitget_rest_base_url="https://api.bitget.com",
         )
@@ -251,7 +253,10 @@ class LiveSourceAdapterTests(unittest.TestCase):
             now_utc=datetime(2025, 1, 11, 7, 59, tzinfo=timezone.utc),
         )
 
+        self.assertTrue(availability.has_liquidation_source)
         self.assertTrue(availability.has_platform_db_source)
         self.assertTrue(availability.has_platform_bridge_source)
         self.assertIsInstance(source_bundle.bridge, LiveHttpPlatformBridge)
         self.assertIsInstance(source_bundle.platform_db_source, LivePlatformDBSource)
+        self.assertIsInstance(source_bundle.liquidation_source, BybitLiveLiquidationSource)
+        self.assertTrue(source_bundle.has_liquidation_source)

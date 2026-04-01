@@ -17,6 +17,7 @@ from .continuous_runtime import (
 from .runtime import preflight_live_source_status, preflight_status, resolve_runtime_availability
 from .single_cycle_runtime import (
     build_run_artifact_writer,
+    close_source_bundle,
     execute_single_cycle,
     load_configured_single_cycle_sources,
     load_single_cycle_fixture,
@@ -63,6 +64,7 @@ def run_forward(
     poll_seconds: int = 30,
 ) -> int:
     settings = Settings.from_env()
+    runner: ContinuousForwardRunner | None = None
     if report_dir is not None:
         settings.report_output_dir = report_dir
     if strict_liquidation is not None:
@@ -174,6 +176,11 @@ def run_forward(
         print(f"run failed: {run.status_reason}")
         print(f"summary: {artifact_paths.summary_path}")
         return 1
+    finally:
+        if runner is not None:
+            runner.close()
+        elif source_bundle is not None:
+            close_source_bundle(source_bundle)
 
     print(f"run finished: {run.run_id}")
     print(f"summary: {result.artifact_paths.summary_path}")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
 import unittest
@@ -206,6 +207,32 @@ class OrchestratorTests(unittest.TestCase):
         self.assertIsNone(result.feature.risky_score)
         self.assertFalse(result.decision.selected)
         self.assertEqual(result.decision.reason_code, "missing_lag_history")
+
+    def test_evaluate_requires_complete_liquidation_when_enabled(self) -> None:
+        result = build_artifact_backed_orchestrator(
+            risky_artifact=make_risky_artifact(),
+            safe_artifact=make_safe_artifact(),
+            require_complete_liquidation=True,
+        ).evaluate(
+            make_input(
+                bybit_snapshot=replace(
+                    make_snapshot(
+                        "bybit",
+                        funding_rate_bps="5",
+                        mark_price="101",
+                        open_interest="100",
+                        book_imbalance="0.2",
+                    ),
+                    liquidation_amount_8h=None,
+                    liquidation_complete=False,
+                )
+            )
+        )
+
+        self.assertFalse(result.feature.entry_evaluable)
+        self.assertEqual(result.feature.reason_code, "missing_liquidation_window")
+        self.assertFalse(result.decision.selected)
+        self.assertEqual(result.decision.reason_code, "missing_liquidation_window")
 
     def test_evaluate_returns_position_already_open_when_position_exists(self) -> None:
         result = build_default_orchestrator().evaluate(

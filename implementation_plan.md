@@ -17,7 +17,7 @@
 - [x] single-cycle runtime เขียน summary, run metadata, trade log, และ cycle artifact ลง disk ได้
 - [x] รัน continuous runtime ได้ผ่าน `python -m papertrade.cli run-forward --pair BTC/USDT --continuous`
 - [x] รัน continuous multi-pair runtime ได้ผ่าน `python -m papertrade.cli run-forward --continuous`
-- [ ] exact forward run กับ source จริงยังไม่พร้อมใช้งาน
+- [ ] exact forward run กับ source จริงยังไม่ถือว่าพร้อมใช้งานจริง: ยังต้องผ่าน live smoke/integration test, รอ liquidation cache warm-up ให้ครบ 8h, และเก็บ behavior ตอน reconnect/stale source ให้ครบ
 
 ## 2. เป้าหมายของโปรเจกต์
 

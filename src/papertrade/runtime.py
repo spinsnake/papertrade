@@ -14,6 +14,8 @@ class RuntimeAvailability:
 
 
 def has_liquidation_source(settings: Settings) -> bool:
+    if settings.live_liquidation_source:
+        return True
     return settings.liquidation_events_path is not None and settings.liquidation_events_path.is_file()
 
 

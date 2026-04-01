@@ -22,6 +22,7 @@ from .scheduler import FundingDecision, RoundScheduler, ensure_utc
 from .scoring import LogisticArtifact, load_artifact_pair
 from .snapshot_collector import SnapshotCollector
 from .sources.liquidation import (
+    BybitLiveLiquidationSource,
     InMemoryLiquidationSource,
     JsonFileLiquidationSource,
     LiquidationEvent,
@@ -178,6 +179,8 @@ def load_configured_single_cycle_sources(
     *,
     pair: Pair,
     now_utc: datetime | None = None,
+    liquidation_source_override: LiquidationSource | None = None,
+    liquidation_source_configured_override: bool | None = None,
 ) -> SingleCycleSourceBundle:
     if settings.live_platform_sources:
         bridge = LiveHttpPlatformBridge(
@@ -202,11 +205,19 @@ def load_configured_single_cycle_sources(
         )
         platform_db_source = SQLitePlatformDBSource(settings.platform_db_path)
 
-    liquidation_source = None
-    liquidation_source_configured = False
-    if settings.liquidation_events_path is not None and settings.liquidation_events_path.is_file():
-        liquidation_source = JsonFileLiquidationSource(settings.liquidation_events_path)
-        liquidation_source_configured = True
+    liquidation_source = liquidation_source_override
+    liquidation_source_configured = False if liquidation_source_configured_override is None else liquidation_source_configured_override
+    if liquidation_source_override is None and liquidation_source_configured_override is None:
+        if settings.live_liquidation_source:
+            liquidation_source = BybitLiveLiquidationSource(
+                pairs=(pair,),
+                ws_url=settings.bybit_liquidation_ws_url,
+                cache_path=settings.live_liquidation_cache_path,
+            )
+            liquidation_source_configured = True
+        elif settings.liquidation_events_path is not None and settings.liquidation_events_path.is_file():
+            liquidation_source = JsonFileLiquidationSource(settings.liquidation_events_path)
+            liquidation_source_configured = True
 
     return SingleCycleSourceBundle(
         now_utc=ensure_utc(now_utc or datetime.now(timezone.utc)),
@@ -264,6 +275,7 @@ def prepare_cycle_runtime(
         risky_artifact=risky_artifact,
         safe_artifact=safe_artifact,
         scheduler=scheduler,
+        require_complete_liquidation=settings.strict_liquidation,
     )
     return PreparedCycleRuntime(
         scheduler=scheduler,
@@ -357,6 +369,12 @@ def build_run_artifact_writer(base_dir: Path, filename_pattern: str) -> RunArtif
         json_store=JsonArtifactStore(base_dir),
         trade_log_writer=CsvTradeLogWriter(base_dir),
     )
+
+
+def close_source_bundle(source_bundle: SingleCycleSourceBundle) -> None:
+    stop = getattr(source_bundle.liquidation_source, "stop", None)
+    if callable(stop):
+        stop()
 
 
 def _settle_positions_for_round(

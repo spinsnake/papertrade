@@ -126,10 +126,11 @@ def build_artifact_backed_orchestrator(
     safe_artifact: LogisticArtifact,
     history_loader: FundingSpreadHistoryLoader | None = None,
     scheduler: RoundScheduler | None = None,
+    require_complete_liquidation: bool = False,
 ) -> SingleCycleOrchestrator:
     return SingleCycleOrchestrator(
         scheduler=scheduler or RoundScheduler(),
-        feature_builder=FeatureBuilder(),
+        feature_builder=FeatureBuilder(require_complete_liquidation=require_complete_liquidation),
         rule_evaluator=RuleEvaluator.from_artifacts(
             risky_artifact=risky_artifact,
             safe_artifact=safe_artifact,
@@ -144,10 +145,11 @@ def build_platform_db_backed_orchestrator(
     risky_artifact: LogisticArtifact,
     safe_artifact: LogisticArtifact,
     scheduler: RoundScheduler | None = None,
+    require_complete_liquidation: bool = False,
 ) -> SingleCycleOrchestrator:
     return SingleCycleOrchestrator(
         scheduler=scheduler or RoundScheduler(),
-        feature_builder=FeatureBuilder(),
+        feature_builder=FeatureBuilder(require_complete_liquidation=require_complete_liquidation),
         rule_evaluator=RuleEvaluator.from_artifacts(
             risky_artifact=risky_artifact,
             safe_artifact=safe_artifact,

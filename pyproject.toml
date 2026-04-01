@@ -3,7 +3,9 @@ name = "papertrade"
 version = "0.1.0"
 description = "Forward paper trade scaffold"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "websockets>=14,<16",
+]
 
 [project.optional-dependencies]
 dev = [

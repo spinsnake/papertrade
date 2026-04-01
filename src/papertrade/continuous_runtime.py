@@ -8,6 +8,7 @@ from typing import Callable, Sequence
 from .config import Settings
 from .contracts import Pair, PaperRun
 from .portfolio import PortfolioSimulator
+from .sources.liquidation import BybitLiveLiquidationSource
 from .sources.platform_db import LivePlatformDBSource, SQLitePlatformDBSource
 from .single_cycle_runtime import (
     PreparedCycleRuntime,
@@ -112,6 +113,11 @@ class ContinuousForwardRunner:
             closed_trades=self.portfolio.trades,
         )
 
+    def close(self) -> None:
+        close = getattr(self.source_loader, "close", None)
+        if callable(close):
+            close()
+
     def run_loop(
         self,
         *,
@@ -144,11 +150,76 @@ class ContinuousForwardRunner:
 
 
 def build_real_source_loader(settings: Settings, pair: Pair | None) -> SourceLoader:
-    return lambda now_utc: _load_real_source_bundles(
-        settings,
-        pair=pair,
-        now_utc=now_utc,
-    )
+    return RealSourceLoader(settings=settings, pair=pair)
+
+
+@dataclass
+class RealSourceLoader:
+    settings: Settings
+    pair: Pair | None
+    _shared_liquidation_source: BybitLiveLiquidationSource | None = field(init=False, default=None)
+    _shared_pairs: tuple[Pair, ...] = field(init=False, default_factory=tuple)
+
+    def __call__(self, now_utc: datetime) -> tuple[SingleCycleSourceBundle, ...]:
+        pairs = self._resolve_pairs()
+        liquidation_source = self._get_shared_liquidation_source(pairs)
+        return tuple(
+            load_configured_single_cycle_sources(
+                self.settings,
+                pair=cycle_pair,
+                now_utc=now_utc,
+                liquidation_source_override=liquidation_source,
+                liquidation_source_configured_override=(
+                    self.settings.live_liquidation_source if liquidation_source is not None else None
+                ),
+            )
+            for cycle_pair in pairs
+        )
+
+    def close(self) -> None:
+        if self._shared_liquidation_source is None:
+            return
+        self._shared_liquidation_source.stop()
+        self._shared_liquidation_source = None
+        self._shared_pairs = ()
+
+    def _resolve_pairs(self) -> tuple[Pair, ...]:
+        if self.pair is not None:
+            return (self.pair,)
+
+        if self.settings.platform_db_path is None and not self.settings.live_platform_sources:
+            raise ValueError("platform_db_path must be configured")
+
+        if self.settings.live_platform_sources:
+            platform_db_source = LivePlatformDBSource(
+                bybit_base_url=self.settings.bybit_rest_base_url,
+                bitget_base_url=self.settings.bitget_rest_base_url,
+            )
+        else:
+            platform_db_source = SQLitePlatformDBSource(self.settings.platform_db_path)
+
+        pairs = tuple(platform_db_source.list_pairs())
+        if not pairs:
+            raise ValueError("no eligible pairs found in platform_db_source")
+        return pairs
+
+    def _get_shared_liquidation_source(
+        self,
+        pairs: tuple[Pair, ...],
+    ) -> BybitLiveLiquidationSource | None:
+        if not self.settings.live_liquidation_source:
+            return None
+        if self._shared_liquidation_source is not None and self._shared_pairs == pairs:
+            return self._shared_liquidation_source
+
+        self.close()
+        self._shared_pairs = pairs
+        self._shared_liquidation_source = BybitLiveLiquidationSource(
+            pairs=pairs,
+            ws_url=self.settings.bybit_liquidation_ws_url,
+            cache_path=self.settings.live_liquidation_cache_path,
+        )
+        return self._shared_liquidation_source
 
 
 def build_simulated_now_provider(
@@ -172,46 +243,6 @@ def build_real_now_provider() -> Callable[[], datetime]:
 
 def real_sleep(seconds: float) -> None:
     time.sleep(seconds)
-
-
-def _load_real_source_bundles(
-    settings: Settings,
-    *,
-    pair: Pair | None,
-    now_utc: datetime,
-) -> tuple[SingleCycleSourceBundle, ...]:
-    if pair is not None:
-        return (
-            load_configured_single_cycle_sources(
-                settings,
-                pair=pair,
-                now_utc=now_utc,
-            ),
-        )
-
-    if settings.platform_db_path is None:
-        if not settings.live_platform_sources:
-            raise ValueError("platform_db_path must be configured")
-
-    if settings.live_platform_sources:
-        platform_db_source = LivePlatformDBSource(
-            bybit_base_url=settings.bybit_rest_base_url,
-            bitget_base_url=settings.bitget_rest_base_url,
-        )
-    else:
-        platform_db_source = SQLitePlatformDBSource(settings.platform_db_path)
-    pairs = tuple(platform_db_source.list_pairs())
-    if not pairs:
-        raise ValueError("no eligible pairs found in platform_db_source")
-
-    return tuple(
-        load_configured_single_cycle_sources(
-            settings,
-            pair=cycle_pair,
-            now_utc=now_utc,
-        )
-        for cycle_pair in pairs
-    )
 
 
 def _normalize_source_bundles(

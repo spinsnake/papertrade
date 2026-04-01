@@ -172,4 +172,11 @@ class SnapshotCollector:
             )
         except Exception:
             return None, False
-        return amount, True
+        complete = True
+        covers_window = getattr(self.liquidation_source, "covers_bybit_liquidation_window", None)
+        if callable(covers_window):
+            try:
+                complete = bool(covers_window(pair, liquidation_start, liquidation_end))
+            except Exception:
+                return None, False
+        return amount, complete

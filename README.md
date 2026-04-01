@@ -19,7 +19,6 @@ Current scope:
 - test suite
 
 Not implemented yet:
-- live liquidation integration
 - full-precision research artifacts
 - research acceptance tests
 
@@ -95,8 +94,22 @@ Live REST-backed single cycle:
 $env:PAPERTRADE_RISKY_ARTIFACT_PATH="artifacts\\risky.json"
 $env:PAPERTRADE_SAFE_ARTIFACT_PATH="artifacts\\safe.json"
 $env:PAPERTRADE_LIVE_PLATFORM_SOURCES="true"
-$env:PAPERTRADE_STRICT_LIQUIDATION="false"
+$env:PAPERTRADE_LIVE_LIQUIDATION_SOURCE="true"
+$env:PAPERTRADE_LIVE_LIQUIDATION_CACHE_PATH="data\\liquidation-cache.json"
+$env:PAPERTRADE_STRICT_LIQUIDATION="true"
 python -m papertrade.cli run-forward --pair BTC/USDT --report-dir reports
+```
+
+Live REST-backed continuous run with strict liquidation:
+
+```powershell
+$env:PAPERTRADE_RISKY_ARTIFACT_PATH="artifacts\\risky.json"
+$env:PAPERTRADE_SAFE_ARTIFACT_PATH="artifacts\\safe.json"
+$env:PAPERTRADE_LIVE_PLATFORM_SOURCES="true"
+$env:PAPERTRADE_LIVE_LIQUIDATION_SOURCE="true"
+$env:PAPERTRADE_LIVE_LIQUIDATION_CACHE_PATH="data\\liquidation-cache.json"
+$env:PAPERTRADE_STRICT_LIQUIDATION="true"
+python -m papertrade.cli run-forward --pair BTC/USDT --continuous --poll-seconds 30 --report-dir reports
 ```
 
 Expected local-source files:
@@ -112,7 +125,9 @@ Expected local-source files:
 Live REST source notes:
 - market state and orderbook are fetched from public Bybit/Bitget REST endpoints at runtime
 - funding and open-interest history are fetched from public Bybit/Bitget REST endpoints at runtime
-- live liquidation is not implemented yet, so `PAPERTRADE_STRICT_LIQUIDATION=false` is required for live REST runs today
+- Bybit liquidation is streamed from `wss://stream.bybit.com/v5/public/linear` and cached locally when `PAPERTRADE_LIVE_LIQUIDATION_SOURCE=true`
+- strict liquidation now works on the live path, but the liquidation cache needs a full rolling 8h window before entries become evaluable
+- if the cache is still warming up, the cycle remains non-evaluable with `missing_liquidation_window`
 
 ## Docker
 
