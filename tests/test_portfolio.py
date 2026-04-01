@@ -284,3 +284,5 @@ class PortfolioTests(unittest.TestCase):
         )
 
         self.assertEqual(final_position.fee_bps, Decimal("23.0"))
+        self.assertEqual(simulator.trades[0].bybit_fee_bps, Decimal("11.0"))
+        self.assertEqual(simulator.trades[0].bitget_fee_bps, Decimal("12"))

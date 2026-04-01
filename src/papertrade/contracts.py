@@ -246,6 +246,8 @@ class PaperTrade:
     entry_risky_score: Decimal
     notional: Decimal
     gross_bps: Decimal
+    bybit_fee_bps: Decimal
+    bitget_fee_bps: Decimal
     fee_bps: Decimal
     slippage_bps: Decimal
     net_bps: Decimal

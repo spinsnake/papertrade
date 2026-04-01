@@ -49,6 +49,8 @@ def make_trade() -> PaperTrade:
         entry_risky_score=Decimal("0.8"),
         notional=Decimal("1"),
         gross_bps=Decimal("8"),
+        bybit_fee_bps=Decimal("2"),
+        bitget_fee_bps=Decimal("2"),
         fee_bps=Decimal("4"),
         slippage_bps=Decimal("4"),
         net_bps=Decimal("0"),
@@ -106,6 +108,7 @@ class PersistenceTests(unittest.TestCase):
             content = path.read_text(encoding="utf-8")
 
         self.assertIn("trade_id,run_id,position_id", content)
+        self.assertIn("bybit_fee_bps,bitget_fee_bps,fee_bps", content)
         self.assertIn("trade-1", content)
         self.assertIn("BTCUSDT", content)
 

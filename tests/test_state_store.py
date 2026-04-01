@@ -86,11 +86,15 @@ class SQLiteStateStoreTests(unittest.TestCase):
 
         self.assertIsNotNone(loaded_run)
         self.assertEqual(loaded_run.status.value, "finished")
+        self.assertEqual(loaded_run.bybit_taker_fee_bps, Decimal("1"))
+        self.assertEqual(loaded_run.bitget_taker_fee_bps, Decimal("1"))
         self.assertEqual(len(loaded_positions), 1)
         self.assertEqual(loaded_positions[0].state.value, "closed")
         self.assertEqual(loaded_positions[0].close_reason, "completed_three_rounds")
         self.assertEqual(len(loaded_positions[0].rounds), 3)
         self.assertEqual(len(loaded_trades), 1)
+        self.assertEqual(loaded_trades[0].bybit_fee_bps, Decimal("2"))
+        self.assertEqual(loaded_trades[0].bitget_fee_bps, Decimal("2"))
         self.assertEqual(loaded_trades[0].close_reason, "completed_three_rounds")
 
     def test_state_store_schema_requires_close_reason_for_closed_positions(self) -> None:

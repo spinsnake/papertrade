@@ -292,9 +292,10 @@ class SQLiteStateStore:
                         trade_id, run_id, position_id, strategy, base, quote, symbol,
                         short_exchange, long_exchange, entry_round, exit_round, entry_time,
                         exit_time, rounds_held, entry_safe_score, entry_risky_score, notional,
-                        gross_bps, fee_bps, slippage_bps, net_bps, gross_pnl, fee_pnl,
-                        slippage_pnl, net_pnl, equity_before, equity_after, close_reason
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        gross_bps, bybit_fee_bps, bitget_fee_bps, fee_bps, slippage_bps, net_bps,
+                        gross_pnl, fee_pnl, slippage_pnl, net_pnl, equity_before, equity_after,
+                        close_reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         trade.trade_id,
@@ -315,6 +316,8 @@ class SQLiteStateStore:
                         str(trade.entry_risky_score),
                         str(trade.notional),
                         str(trade.gross_bps),
+                        str(trade.bybit_fee_bps),
+                        str(trade.bitget_fee_bps),
                         str(trade.fee_bps),
                         str(trade.slippage_bps),
                         str(trade.net_bps),
@@ -399,12 +402,38 @@ class SQLiteStateStore:
 
     def load_trades(self, run_id: str) -> list[PaperTrade]:
         with closing(self._connect()) as connection:
+            run_row = connection.execute("SELECT * FROM paper_runs WHERE run_id = ?", (run_id,)).fetchone()
             rows = connection.execute(
                 "SELECT * FROM paper_trades WHERE run_id = ? ORDER BY entry_round ASC, trade_id ASC",
                 (run_id,),
             ).fetchall()
+        run = self._run_from_row(run_row) if run_row is not None else None
         trades: list[PaperTrade] = []
         for row in rows:
+            fee_bps = _dec(row["fee_bps"]) or Decimal("0")
+            bybit_fee_bps = (
+                _dec(row["bybit_fee_bps"])
+                if "bybit_fee_bps" in row.keys()
+                else None
+            )
+            bitget_fee_bps = (
+                _dec(row["bitget_fee_bps"])
+                if "bitget_fee_bps" in row.keys()
+                else None
+            )
+            if bybit_fee_bps is None and bitget_fee_bps is None:
+                if run is not None:
+                    bybit_fee_bps = run.bybit_taker_fee_bps * Decimal("2")
+                    bitget_fee_bps = run.bitget_taker_fee_bps * Decimal("2")
+                else:
+                    bybit_fee_bps = fee_bps / Decimal("2")
+                    bitget_fee_bps = fee_bps / Decimal("2")
+            elif bybit_fee_bps is None or bitget_fee_bps is None:
+                remaining_fee_bps = fee_bps - (bybit_fee_bps or Decimal("0")) - (bitget_fee_bps or Decimal("0"))
+                if bybit_fee_bps is None:
+                    bybit_fee_bps = remaining_fee_bps
+                if bitget_fee_bps is None:
+                    bitget_fee_bps = remaining_fee_bps
             trades.append(
                 PaperTrade(
                     trade_id=str(row["trade_id"]),
@@ -423,7 +452,9 @@ class SQLiteStateStore:
                     entry_risky_score=_dec(row["entry_risky_score"]) or Decimal("0"),
                     notional=_dec(row["notional"]) or Decimal("0"),
                     gross_bps=_dec(row["gross_bps"]) or Decimal("0"),
-                    fee_bps=_dec(row["fee_bps"]) or Decimal("0"),
+                    bybit_fee_bps=bybit_fee_bps,
+                    bitget_fee_bps=bitget_fee_bps,
+                    fee_bps=fee_bps,
                     slippage_bps=_dec(row["slippage_bps"]) or Decimal("0"),
                     net_bps=_dec(row["net_bps"]) or Decimal("0"),
                     gross_pnl=_dec(row["gross_pnl"]) or Decimal("0"),
@@ -580,6 +611,8 @@ class SQLiteStateStore:
                     entry_risky_score TEXT NOT NULL,
                     notional TEXT NOT NULL,
                     gross_bps TEXT NOT NULL,
+                    bybit_fee_bps TEXT NULL,
+                    bitget_fee_bps TEXT NULL,
                     fee_bps TEXT NOT NULL,
                     slippage_bps TEXT NOT NULL,
                     net_bps TEXT NOT NULL,
@@ -607,6 +640,8 @@ class SQLiteStateStore:
             )
             self._ensure_column(connection, "paper_runs", "bybit_taker_fee_bps", "TEXT NULL")
             self._ensure_column(connection, "paper_runs", "bitget_taker_fee_bps", "TEXT NULL")
+            self._ensure_column(connection, "paper_trades", "bybit_fee_bps", "TEXT NULL")
+            self._ensure_column(connection, "paper_trades", "bitget_fee_bps", "TEXT NULL")
             connection.commit()
 
     def _connect(self) -> sqlite3.Connection:

@@ -193,6 +193,8 @@ class PortfolioSimulator:
                 entry_risky_score=position.entry_risky_score,
                 notional=position.notional,
                 gross_bps=gross_bps,
+                bybit_fee_bps=bybit_fee_bps,
+                bitget_fee_bps=bitget_fee_bps,
                 fee_bps=fee_bps,
                 slippage_bps=slippage_bps,
                 net_bps=net_bps,
