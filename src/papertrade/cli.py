@@ -52,9 +52,9 @@ def run_forward(report_dir: Path | None = None, strict_liquidation: bool | None 
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.command == "run-forward":
         strict = None
         if args.strict_liquidation is not None:
