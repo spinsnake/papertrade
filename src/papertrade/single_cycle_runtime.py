@@ -12,13 +12,14 @@ from .contracts import Funding, Level, MarketState, OpenInterest, Orderbook, Pai
 from .orchestrator import (
     SingleCycleInput,
     SingleCycleResult,
+    SingleCycleOrchestrator,
     build_platform_db_backed_orchestrator,
 )
 from .persistence import CsvTradeLogWriter, JsonArtifactStore, RunArtifactPaths, RunArtifactWriter
 from .portfolio import PortfolioSimulator
-from .report import MarkdownReportWriter
+from .report import MarkdownReportWriter, format_as_of_round
 from .scheduler import FundingDecision, RoundScheduler, ensure_utc
-from .scoring import load_artifact_pair
+from .scoring import LogisticArtifact, load_artifact_pair
 from .snapshot_collector import SnapshotCollector
 from .sources.liquidation import (
     InMemoryLiquidationSource,
@@ -84,6 +85,17 @@ class SingleCycleExecutionResult:
     artifact_paths: RunArtifactPaths
     cycle_artifact_path: Path
     opened_position_id: str | None
+    settled_position_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PreparedCycleRuntime:
+    scheduler: RoundScheduler
+    collector: SnapshotCollector
+    orchestrator: SingleCycleOrchestrator
+    artifact_writer: RunArtifactWriter
+    risky_artifact: LogisticArtifact
+    safe_artifact: LogisticArtifact
 
 
 def load_single_cycle_fixture(path: str | Path) -> SingleCycleSourceBundle:
@@ -200,6 +212,27 @@ def execute_single_cycle(
     run: PaperRun,
     source_bundle: SingleCycleSourceBundle,
 ) -> SingleCycleExecutionResult:
+    prepared_runtime = prepare_cycle_runtime(
+        settings=settings,
+        source_bundle=source_bundle,
+        run=run,
+    )
+    portfolio = PortfolioSimulator(run=run)
+    return execute_cycle(
+        run=run,
+        portfolio=portfolio,
+        source_bundle=source_bundle,
+        prepared_runtime=prepared_runtime,
+        mark_run_finished=True,
+    )
+
+
+def prepare_cycle_runtime(
+    *,
+    settings: Settings,
+    source_bundle: SingleCycleSourceBundle,
+    run: PaperRun,
+) -> PreparedCycleRuntime:
     if settings.risky_artifact_path is None or settings.safe_artifact_path is None:
         raise ValueError("artifact paths must be configured for single-cycle runtime")
 
@@ -208,33 +241,49 @@ def execute_single_cycle(
         safe_artifact_path=settings.safe_artifact_path,
     )
     scheduler = RoundScheduler(decision_buffer_seconds=settings.decision_buffer_seconds)
-    funding_decision = scheduler.next_decision(source_bundle.now_utc)
     collector = SnapshotCollector(
         bridge=source_bundle.bridge,
         liquidation_source=source_bundle.liquidation_source,
         market_state_staleness_seconds=settings.market_state_staleness_seconds,
         orderbook_staleness_seconds=settings.orderbook_staleness_seconds,
     )
-    bybit_snapshot, bitget_snapshot = collector.collect_pair_snapshots(
-        pair=source_bundle.pair,
-        funding_decision=funding_decision,
-    )
-
-    portfolio = PortfolioSimulator(run=run)
     orchestrator = build_platform_db_backed_orchestrator(
         platform_db_source=source_bundle.platform_db_source,
         risky_artifact=risky_artifact,
         safe_artifact=safe_artifact,
         scheduler=scheduler,
     )
-    cycle_result = orchestrator.evaluate(
+    return PreparedCycleRuntime(
+        scheduler=scheduler,
+        collector=collector,
+        orchestrator=orchestrator,
+        artifact_writer=build_run_artifact_writer(Path(run.report_output_dir), run.report_filename_pattern),
+        risky_artifact=risky_artifact,
+        safe_artifact=safe_artifact,
+    )
+
+
+def execute_cycle(
+    *,
+    run: PaperRun,
+    portfolio: PortfolioSimulator,
+    source_bundle: SingleCycleSourceBundle,
+    prepared_runtime: PreparedCycleRuntime,
+    mark_run_finished: bool,
+) -> SingleCycleExecutionResult:
+    funding_decision = prepared_runtime.scheduler.next_decision(source_bundle.now_utc)
+    bybit_snapshot, bitget_snapshot = prepared_runtime.collector.collect_pair_snapshots(
+        pair=source_bundle.pair,
+        funding_decision=funding_decision,
+    )
+    cycle_result = prepared_runtime.orchestrator.evaluate(
         SingleCycleInput(
             now_utc=source_bundle.now_utc,
             pair=source_bundle.pair,
             bybit_snapshot=bybit_snapshot,
             bitget_snapshot=bitget_snapshot,
-            risky_artifact=risky_artifact,
-            safe_artifact=safe_artifact,
+            risky_artifact=prepared_runtime.risky_artifact,
+            safe_artifact=prepared_runtime.safe_artifact,
             has_open_position=portfolio.has_open_position(source_bundle.pair),
         )
     )
@@ -244,20 +293,29 @@ def execute_single_cycle(
         position = portfolio.open_position(
             decision=cycle_result.decision,
             entry_time=source_bundle.now_utc,
-            planned_exit_round=scheduler.exit_round(cycle_result.decision.funding_round),
+            planned_exit_round=prepared_runtime.scheduler.exit_round(cycle_result.decision.funding_round),
         )
         opened_position_id = position.position_id
 
-    run.mark_finished()
-    artifact_writer = build_run_artifact_writer(Path(run.report_output_dir), run.report_filename_pattern)
-    artifact_paths = artifact_writer.write_outputs(
+    settled_position_ids = _settle_positions_for_round(
+        portfolio=portfolio,
+        pair=source_bundle.pair,
+        funding_round=funding_decision.funding_round,
+        bybit_funding_rate_bps=bybit_snapshot.funding_rate_bps,
+        bitget_funding_rate_bps=bitget_snapshot.funding_rate_bps,
+    )
+
+    if mark_run_finished:
+        run.mark_finished()
+
+    artifact_paths = prepared_runtime.artifact_writer.write_outputs(
         run=run,
         as_of_round=funding_decision.funding_round,
         open_positions=sum(1 for position in portfolio.positions.values() if position.state.value == "open"),
         closed_trades=portfolio.trades,
     )
-    cycle_artifact_path = artifact_writer.json_store.write_json(
-        f"cycles/{run.run_id}.json",
+    cycle_artifact_path = prepared_runtime.artifact_writer.json_store.write_json(
+        f"cycles/{run.run_id}__{source_bundle.pair.symbol}__{format_as_of_round(funding_decision.funding_round)}.json",
         {
             "funding_decision": funding_decision,
             "bybit_snapshot": bybit_snapshot,
@@ -265,6 +323,7 @@ def execute_single_cycle(
             "feature": cycle_result.feature,
             "decision": cycle_result.decision,
             "opened_position_id": opened_position_id,
+            "settled_position_ids": settled_position_ids,
         },
     )
     return SingleCycleExecutionResult(
@@ -273,6 +332,7 @@ def execute_single_cycle(
         artifact_paths=artifact_paths,
         cycle_artifact_path=cycle_artifact_path,
         opened_position_id=opened_position_id,
+        settled_position_ids=settled_position_ids,
     )
 
 
@@ -285,6 +345,32 @@ def build_run_artifact_writer(base_dir: Path, filename_pattern: str) -> RunArtif
         json_store=JsonArtifactStore(base_dir),
         trade_log_writer=CsvTradeLogWriter(base_dir),
     )
+
+
+def _settle_positions_for_round(
+    *,
+    portfolio: PortfolioSimulator,
+    pair: Pair,
+    funding_round: datetime,
+    bybit_funding_rate_bps: Decimal | None,
+    bitget_funding_rate_bps: Decimal | None,
+) -> tuple[str, ...]:
+    settled: list[str] = []
+    for position_id, position in tuple(portfolio.positions.items()):
+        if position.pair != pair or position.state.value != "open":
+            continue
+        if position.entry_round > funding_round or position.planned_exit_round < funding_round:
+            continue
+        if position.rounds and position.rounds[-1].funding_round >= funding_round:
+            continue
+        portfolio.settle_round(
+            position_id=position_id,
+            funding_round=funding_round,
+            bybit_funding_rate_bps=bybit_funding_rate_bps,
+            bitget_funding_rate_bps=bitget_funding_rate_bps,
+        )
+        settled.append(position_id)
+    return tuple(settled)
 
 
 def _funding_history(pair: Pair, payload: object) -> list[Funding]:

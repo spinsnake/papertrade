@@ -9,12 +9,14 @@
 
 - [x] package entrypoint ชี้ `papertrade.cli:main`
 - [x] รัน `python -m unittest discover -s tests -v` ผ่าน
-- [x] ชุดทดสอบปัจจุบันผ่าน `57 tests`
+- [x] ชุดทดสอบปัจจุบันผ่าน `62 tests`
 - [x] รัน `python -m papertrade.cli run-forward` ได้
 - [x] path default ของ CLI ยังเป็น preflight-only และ block ด้วย `missing_liquidation_source` ได้ถูกต้อง
 - [x] รัน single-cycle runtime ได้ผ่าน `python -m papertrade.cli run-forward --input-file <fixture.json>`
 - [x] รัน single-cycle runtime ได้ผ่าน `python -m papertrade.cli run-forward --pair BTC/USDT` เมื่อ config real sources ครบ
 - [x] single-cycle runtime เขียน summary, run metadata, trade log, และ cycle artifact ลง disk ได้
+- [x] รัน continuous runtime ได้ผ่าน `python -m papertrade.cli run-forward --pair BTC/USDT --continuous`
+- [x] รัน continuous multi-pair runtime ได้ผ่าน `python -m papertrade.cli run-forward --continuous`
 - [ ] exact forward run กับ source จริงยังไม่พร้อมใช้งาน
 
 ## 2. เป้าหมายของโปรเจกต์
@@ -151,7 +153,7 @@
 - [x] validate pair / exchange / round / cutoff contract ของ snapshots
 - [x] skip scoring เมื่อ `entry_evaluable = False`
 - [x] resolve lag/rolling history จาก platform DB adapter ได้
-- [ ] ยังไม่เป็น multi-pair / continuous funding loop
+- [x] มี continuous funding loop สำหรับหลาย pair
 
 ### 7.7 Portfolio Simulator
 
@@ -190,8 +192,9 @@
 - [x] มี runtime path สำหรับ `failed` หลัง preflight ผ่านแล้ว
 - [x] มี [single_cycle_runtime.py](/d:/git/papertrade/src/papertrade/single_cycle_runtime.py)
 - [x] CLI รองรับ `--input-file` สำหรับ single-cycle runtime จาก fixture
+- [x] CLI รองรับ `--continuous`, `--max-cycles`, และ `--poll-seconds`
 - [ ] CLI args ยังไม่ครบตามแผนเดิม เช่น initial-equity / fee-bps / slippage-bps override
-- [ ] full runtime loop ตาม funding rounds จริงยังไม่เสร็จ
+- [ ] full runtime loop ตาม funding rounds จริงยังไม่รองรับ live transport จริง
 
 ## 8. Source Adapters
 
@@ -271,6 +274,8 @@
 - [x] pair filtering test ผ่าน
 - [x] lag funding features test ผ่าน
 - [x] single-cycle runtime integration test ผ่าน
+- [x] continuous runtime integration test ผ่าน
+- [x] continuous multi-pair CLI integration test ผ่าน
 - [x] SQLite/JSON-backed CLI integration test ผ่าน
 - [ ] research acceptance vector test
 - [ ] integration test กับ source จริง
@@ -327,7 +332,7 @@
 - [x] เขียน JSON run/cycle artifacts จริง
 - [x] wire CLI -> collector -> orchestrator -> persistence สำหรับ single cycle
 - [x] wire CLI -> SQLite/JSON sources -> collector -> orchestrator -> persistence สำหรับ single cycle
-- [ ] ขยายเป็น multi-cycle / continuous runtime
+- [x] ขยายเป็น multi-pair continuous runtime
 
 ### Phase 6: Hardening
 
@@ -373,7 +378,7 @@
 - [ ] เพิ่ม sample SQLite/JSON source files สำหรับรัน real-source single cycle ได้ทันที
 - [ ] implement external/live adapters สำหรับ platform DB / bridge / liquidation
 - [ ] ทำ runtime availability ให้ตรวจ source จริง ไม่ใช่ fixture override
-- [ ] ขยาย single-cycle runtime เป็น multi-pair / multi-cycle loop
+- [x] ขยาย single-cycle runtime เป็น multi-pair / multi-cycle loop
 - [ ] export full-precision model artifacts จาก research repo
 - [ ] เพิ่ม research acceptance vector test
 - [ ] เพิ่ม Parquet / DB persistence ถ้าจะใช้วิเคราะห์ผลย้อนหลัง

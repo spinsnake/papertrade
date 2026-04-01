@@ -12,10 +12,11 @@ Current scope:
 - in-memory adapters
 - SQLite/JSON-backed source adapters
 - single-cycle CLI runtime
+- continuous multi-cycle CLI runtime
+- multi-pair continuous loop from SQLite pair universe
 - test suite
 
 Not implemented yet:
-- continuous multi-cycle runtime
 - live transport integration
 - full-precision research artifacts
 - research acceptance tests
@@ -48,6 +49,44 @@ $env:PAPERTRADE_LIQUIDATION_EVENTS_PATH="data\\liquidations.json"
 python -m papertrade.cli run-forward --pair BTC/USDT --now-utc 2025-01-11T07:59:00+00:00 --report-dir reports
 ```
 
+SQLite/JSON-backed continuous run:
+
+Simulated multi-cycle run:
+
+```powershell
+$env:PAPERTRADE_RISKY_ARTIFACT_PATH="artifacts\\risky.json"
+$env:PAPERTRADE_SAFE_ARTIFACT_PATH="artifacts\\safe.json"
+$env:PAPERTRADE_PLATFORM_DB_PATH="data\\platform.sqlite3"
+$env:PAPERTRADE_MARKET_STATE_SNAPSHOT_PATH="data\\market_states.json"
+$env:PAPERTRADE_ORDERBOOK_SNAPSHOT_PATH="data\\orderbooks.json"
+$env:PAPERTRADE_LIQUIDATION_EVENTS_PATH="data\\liquidations.json"
+python -m papertrade.cli run-forward --pair BTC/USDT --continuous --now-utc 2025-01-11T07:59:00+00:00 --max-cycles 3 --poll-seconds 0 --report-dir reports
+```
+
+Real-time polling run:
+
+```powershell
+$env:PAPERTRADE_RISKY_ARTIFACT_PATH="artifacts\\risky.json"
+$env:PAPERTRADE_SAFE_ARTIFACT_PATH="artifacts\\safe.json"
+$env:PAPERTRADE_PLATFORM_DB_PATH="data\\platform.sqlite3"
+$env:PAPERTRADE_MARKET_STATE_SNAPSHOT_PATH="data\\market_states.json"
+$env:PAPERTRADE_ORDERBOOK_SNAPSHOT_PATH="data\\orderbooks.json"
+$env:PAPERTRADE_LIQUIDATION_EVENTS_PATH="data\\liquidations.json"
+python -m papertrade.cli run-forward --pair BTC/USDT --continuous --poll-seconds 30 --report-dir reports
+```
+
+All-pairs continuous run from SQLite universe:
+
+```powershell
+$env:PAPERTRADE_RISKY_ARTIFACT_PATH="artifacts\\risky.json"
+$env:PAPERTRADE_SAFE_ARTIFACT_PATH="artifacts\\safe.json"
+$env:PAPERTRADE_PLATFORM_DB_PATH="data\\platform.sqlite3"
+$env:PAPERTRADE_MARKET_STATE_SNAPSHOT_PATH="data\\market_states.json"
+$env:PAPERTRADE_ORDERBOOK_SNAPSHOT_PATH="data\\orderbooks.json"
+$env:PAPERTRADE_LIQUIDATION_EVENTS_PATH="data\\liquidations.json"
+python -m papertrade.cli run-forward --continuous --now-utc 2025-01-11T07:59:00+00:00 --max-cycles 3 --poll-seconds 0 --report-dir reports
+```
+
 Expected real-source files:
 - `platform.sqlite3`
   - tables: `instruments`, `funding`, `open_interest`
@@ -57,3 +96,52 @@ Expected real-source files:
   - JSON array of orderbook records with `exchange`, `base`, `quote`, `bids`, `asks`, `updated_at`
 - `liquidations.json`
   - JSON array of liquidation events with `base`, `quote`, `time`, `usd_size`
+
+## Docker
+
+Build image:
+
+```powershell
+docker build -t papertrade:local .
+```
+
+Run fixture-backed single cycle:
+
+```powershell
+docker run --rm `
+  -v ${PWD}\reports:/app/reports `
+  -v ${PWD}\fixtures:/app/fixtures:ro `
+  -v ${PWD}\artifacts:/app/artifacts:ro `
+  -e PAPERTRADE_RISKY_ARTIFACT_PATH=/app/artifacts/risky.json `
+  -e PAPERTRADE_SAFE_ARTIFACT_PATH=/app/artifacts/safe.json `
+  papertrade:local `
+  run-forward `
+  --input-file /app/fixtures/cycle.json `
+  --report-dir /app/reports
+```
+
+Run SQLite/JSON-backed single cycle:
+
+```powershell
+docker run --rm `
+  -v ${PWD}\reports:/app/reports `
+  -v ${PWD}\data:/app/data:ro `
+  -v ${PWD}\artifacts:/app/artifacts:ro `
+  -e PAPERTRADE_RISKY_ARTIFACT_PATH=/app/artifacts/risky.json `
+  -e PAPERTRADE_SAFE_ARTIFACT_PATH=/app/artifacts/safe.json `
+  -e PAPERTRADE_PLATFORM_DB_PATH=/app/data/platform.sqlite3 `
+  -e PAPERTRADE_MARKET_STATE_SNAPSHOT_PATH=/app/data/market_states.json `
+  -e PAPERTRADE_ORDERBOOK_SNAPSHOT_PATH=/app/data/orderbooks.json `
+  -e PAPERTRADE_LIQUIDATION_EVENTS_PATH=/app/data/liquidations.json `
+  papertrade:local `
+  run-forward `
+  --pair BTC/USDT `
+  --now-utc 2025-01-11T07:59:00+00:00 `
+  --report-dir /app/reports
+```
+
+Output files are written to the host `reports` directory through the mounted volume:
+- `runs/*.json`
+- `trades/*.csv`
+- `cycles/*.json`
+- `*.md`

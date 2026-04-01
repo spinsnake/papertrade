@@ -7,6 +7,13 @@ from uuid import uuid4
 
 from .config import Settings
 from .contracts import Pair, PaperRun
+from .continuous_runtime import (
+    ContinuousForwardRunner,
+    build_real_now_provider,
+    build_real_source_loader,
+    build_simulated_now_provider,
+    real_sleep,
+)
 from .runtime import preflight_live_source_status, preflight_status, resolve_runtime_availability
 from .single_cycle_runtime import (
     build_run_artifact_writer,
@@ -38,6 +45,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_forward_parser.add_argument("--now-utc", type=_parse_datetime, default=None)
     run_forward_parser.add_argument("--report-dir", type=Path, default=None)
     run_forward_parser.add_argument("--input-file", type=Path, default=None)
+    run_forward_parser.add_argument("--continuous", action="store_true")
+    run_forward_parser.add_argument("--max-cycles", type=int, default=None)
+    run_forward_parser.add_argument("--poll-seconds", type=int, default=30)
     run_forward_parser.add_argument("--strict-liquidation", choices=["true", "false"], default=None)
     return parser
 
@@ -48,6 +58,9 @@ def run_forward(
     input_file: Path | None = None,
     pair: Pair | None = None,
     now_utc: datetime | None = None,
+    continuous: bool = False,
+    max_cycles: int | None = None,
+    poll_seconds: int = 30,
 ) -> int:
     settings = Settings.from_env()
     if report_dir is not None:
@@ -73,6 +86,11 @@ def run_forward(
 
     source_bundle = None
     try:
+        if continuous and input_file is not None:
+            raise ValueError("continuous mode does not support --input-file")
+        if continuous and now_utc is not None and max_cycles is None:
+            raise ValueError("continuous mode with --now-utc requires --max-cycles")
+
         if input_file is not None:
             source_bundle = load_single_cycle_fixture(input_file)
         availability = resolve_runtime_availability(
@@ -89,12 +107,45 @@ def run_forward(
             print(f"run blocked: {run.status_reason}")
             return 2
 
-        if input_file is None and pair is not None:
+        if input_file is None and (pair is not None or continuous):
             status, reason = preflight_live_source_status(availability)
             if status == "blocked":
                 run.mark_blocked(reason)
                 print(f"run blocked: {run.status_reason}")
                 return 2
+
+            if continuous:
+                runner = ContinuousForwardRunner(
+                    settings=settings,
+                    run=run,
+                    source_loader=build_real_source_loader(settings, pair),
+                    pair=pair,
+                )
+                if now_utc is None:
+                    now_provider = build_real_now_provider()
+                    sleep_fn = real_sleep
+                else:
+                    now_provider = build_simulated_now_provider(
+                        start_utc=now_utc,
+                        step_seconds=max(poll_seconds, 8 * 60 * 60),
+                    )
+                    sleep_fn = lambda _: None
+
+                completed_cycles = runner.run_loop(
+                    max_cycles=max_cycles,
+                    poll_seconds=poll_seconds,
+                    now_provider=now_provider,
+                    sleep_fn=sleep_fn,
+                )
+                print(f"run finished: {run.run_id}")
+                print(f"completed_cycles: {completed_cycles}")
+                if runner.last_cycle_result is not None:
+                    print(f"processed_pairs: {len(runner.last_cycle_result.results)}")
+                if runner.last_result is not None:
+                    print(f"summary: {runner.last_result.artifact_paths.summary_path}")
+                    print(f"last_cycle: {runner.last_result.cycle_artifact_path}")
+                return 0
+
             source_bundle = load_configured_single_cycle_sources(
                 settings,
                 pair=pair,
@@ -145,6 +196,9 @@ def main(argv: list[str] | None = None) -> int:
             input_file=args.input_file,
             pair=args.pair,
             now_utc=args.now_utc,
+            continuous=args.continuous,
+            max_cycles=args.max_cycles,
+            poll_seconds=args.poll_seconds,
         )
     parser.error(f"unknown command: {args.command}")
     return 2
