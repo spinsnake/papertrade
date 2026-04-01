@@ -17,3 +17,6 @@ Not implemented yet:
 - market bridge integration
 - liquidation source
 - full report persistence pipeline
+
+run cli
+python -m papertrade.cli run-forward

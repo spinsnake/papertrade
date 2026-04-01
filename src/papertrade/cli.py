@@ -7,8 +7,7 @@ from uuid import uuid4
 
 from .config import Settings
 from .contracts import PaperRun
-from .runtime import preflight_status
-
+from .runtime import preflight_status, resolve_runtime_availability
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="papertrade")
@@ -41,12 +40,9 @@ def run_forward(report_dir: Path | None = None, strict_liquidation: bool | None 
         orderbook_staleness_sec=settings.orderbook_staleness_seconds,
         strict_liquidation=settings.strict_liquidation,
     )
-    has_model_artifacts = settings.risky_artifact_path is not None and settings.safe_artifact_path is not None
-    status, reason = preflight_status(
-        settings,
-        has_liquidation_source=False,
-        has_model_artifacts=has_model_artifacts,
-    )
+    availability = resolve_runtime_availability(settings)
+    status, reason = preflight_status(settings, availability)
+    
     if status == "blocked":
         run.mark_blocked(reason)
         print(f"run blocked: {run.status_reason}")

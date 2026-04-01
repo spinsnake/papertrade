@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: papertrade
+Version: 0.1.0
+Summary: Forward paper trade scaffold
+Requires-Python: >=3.12
+Provides-Extra: dev
+Requires-Dist: pytest>=8.3.0; extra == "dev"

@@ -11,7 +11,7 @@ dev = [
 ]
 
 [project.scripts]
-papertrade = "papertrade.cli:app"
+papertrade = "papertrade.cli:main"
 
 [build-system]
 requires = ["setuptools>=69.0"]
