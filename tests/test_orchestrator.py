@@ -5,12 +5,15 @@ from decimal import Decimal
 import unittest
 
 from papertrade.contracts import FundingRoundSnapshot, Pair
+from papertrade.contracts import Funding
 from papertrade.orchestrator import (
     SingleCycleInput,
     build_artifact_backed_orchestrator,
     build_default_orchestrator,
+    build_platform_db_backed_orchestrator,
 )
 from papertrade.scoring import LogisticArtifact
+from papertrade.sources.platform_db import InMemoryPlatformDBSource
 
 
 def make_risky_artifact() -> LogisticArtifact:
@@ -170,6 +173,16 @@ def make_input(**overrides: object) -> SingleCycleInput:
     }
     data.update(overrides)
     return SingleCycleInput(**data)
+
+
+def make_funding(*, exchange: str, pair: Pair, time: datetime, rate: str) -> Funding:
+    return Funding(
+        time=time,
+        exchange=exchange,
+        base=pair.base,
+        quote=pair.quote,
+        funding_rate=Decimal(rate),
+    )
 
 
 class OrchestratorTests(unittest.TestCase):
@@ -336,3 +349,67 @@ class OrchestratorTests(unittest.TestCase):
 
         self.assertFalse(result.decision.selected)
         self.assertEqual(result.decision.reason_code, "below_safe_threshold")
+
+    def test_evaluate_resolves_history_from_platform_db_when_inputs_are_missing(self) -> None:
+        pair = Pair("BTC", "USDT")
+        source = InMemoryPlatformDBSource()
+        for exchange, time, rate in (
+            ("bybit", datetime(2025, 1, 11, 0, 0, tzinfo=timezone.utc), "0.0005"),
+            ("bitget", datetime(2025, 1, 11, 0, 0, tzinfo=timezone.utc), "0.0002"),
+            ("bybit", datetime(2025, 1, 10, 16, 0, tzinfo=timezone.utc), "0.0004"),
+            ("bitget", datetime(2025, 1, 10, 16, 0, tzinfo=timezone.utc), "0.0001"),
+            ("bybit", datetime(2025, 1, 10, 8, 0, tzinfo=timezone.utc), "0.0003"),
+            ("bitget", datetime(2025, 1, 10, 8, 0, tzinfo=timezone.utc), "0.0001"),
+        ):
+            source.put_funding(make_funding(exchange=exchange, pair=pair, time=time, rate=rate))
+
+        result = build_platform_db_backed_orchestrator(
+            platform_db_source=source,
+            risky_artifact=make_risky_artifact(),
+            safe_artifact=make_safe_artifact(),
+        ).evaluate(
+            make_input(
+                pair=pair,
+                lag1_abs_spread_bps=None,
+                rolling3_mean_abs_spread_bps=None,
+            )
+        )
+
+        self.assertTrue(result.feature.entry_evaluable)
+        self.assertEqual(result.feature.lag1_current_abs_funding_spread_bps, Decimal("3"))
+        self.assertEqual(result.feature.rolling3_mean_abs_funding_spread_bps, Decimal("8") / Decimal("3"))
+
+    def test_evaluate_keeps_missing_lag_history_when_platform_db_has_insufficient_matches(self) -> None:
+        pair = Pair("BTC", "USDT")
+        source = InMemoryPlatformDBSource()
+        source.put_funding(
+            make_funding(
+                exchange="bybit",
+                pair=pair,
+                time=datetime(2025, 1, 11, 0, 0, tzinfo=timezone.utc),
+                rate="0.0005",
+            )
+        )
+        source.put_funding(
+            make_funding(
+                exchange="bitget",
+                pair=pair,
+                time=datetime(2025, 1, 11, 0, 0, tzinfo=timezone.utc),
+                rate="0.0002",
+            )
+        )
+
+        result = build_platform_db_backed_orchestrator(
+            platform_db_source=source,
+            risky_artifact=make_risky_artifact(),
+            safe_artifact=make_safe_artifact(),
+        ).evaluate(
+            make_input(
+                pair=pair,
+                lag1_abs_spread_bps=None,
+                rolling3_mean_abs_spread_bps=None,
+            )
+        )
+
+        self.assertFalse(result.feature.entry_evaluable)
+        self.assertEqual(result.feature.reason_code, "missing_lag_history")

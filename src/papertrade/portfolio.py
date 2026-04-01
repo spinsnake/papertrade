@@ -27,6 +27,8 @@ class PortfolioSimulator:
     ) -> PaperPosition:
         if not decision.selected or decision.short_exchange is None or decision.long_exchange is None:
             raise ValueError("decision must be selected before opening a position")
+        if planned_exit_round <= decision.funding_round:
+            raise ValueError("planned_exit_round must be after entry_round")
 
         position = PaperPosition(
             position_id=str(uuid4()),
@@ -62,6 +64,7 @@ class PortfolioSimulator:
         position = self.positions[position_id]
         if position.state is not PositionState.OPEN:
             raise ValueError("can only settle open positions")
+        self._validate_settlement_round(position, funding_round)
 
         if bybit_funding_rate_bps is None or bitget_funding_rate_bps is None:
             position.state = PositionState.SETTLEMENT_ERROR
@@ -126,8 +129,12 @@ class PortfolioSimulator:
         position.net_pnl = net_pnl
         position.equity_after = self.run.current_equity + net_pnl
 
+        prior_peak = self.run.peak_equity
         self.run.current_equity = position.equity_after
-        self.run.peak_equity = max(self.run.peak_equity, self.run.current_equity)
+        self.run.peak_equity = max(prior_peak, self.run.current_equity)
+        if self.run.peak_equity > 0:
+            drawdown_pct = (self.run.peak_equity - self.run.current_equity) / self.run.peak_equity * Decimal("100")
+            self.run.max_drawdown_pct = max(self.run.max_drawdown_pct, drawdown_pct)
 
         self.trades.append(
             PaperTrade(
@@ -159,3 +166,11 @@ class PortfolioSimulator:
                 close_reason="completed_three_rounds",
             )
         )
+
+    def _validate_settlement_round(self, position: PaperPosition, funding_round: datetime) -> None:
+        if funding_round < position.entry_round:
+            raise ValueError("funding_round must not be before entry_round")
+        if funding_round > position.planned_exit_round:
+            raise ValueError("funding_round must not be after planned_exit_round")
+        if position.rounds and funding_round <= position.rounds[-1].funding_round:
+            raise ValueError("funding_round must be strictly increasing")

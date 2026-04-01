@@ -5,7 +5,12 @@ import tempfile
 import unittest
 
 from papertrade.config import Settings
-from papertrade.runtime import RuntimeAvailability, preflight_status, resolve_runtime_availability
+from papertrade.runtime import (
+    RuntimeAvailability,
+    preflight_live_source_status,
+    preflight_status,
+    resolve_runtime_availability,
+)
 
 
 class RuntimeTests(unittest.TestCase):
@@ -50,3 +55,41 @@ class RuntimeTests(unittest.TestCase):
 
         self.assertTrue(availability.has_model_artifacts)
         self.assertFalse(availability.has_liquidation_source)
+
+    def test_resolve_runtime_availability_detects_live_source_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_dir = Path(tmpdir)
+            platform_db_path = base_dir / "platform.sqlite3"
+            market_state_snapshot_path = base_dir / "market_states.json"
+            orderbook_snapshot_path = base_dir / "orderbooks.json"
+            liquidation_events_path = base_dir / "liquidations.json"
+            platform_db_path.write_text("", encoding="utf-8")
+            market_state_snapshot_path.write_text("[]", encoding="utf-8")
+            orderbook_snapshot_path.write_text("[]", encoding="utf-8")
+            liquidation_events_path.write_text("[]", encoding="utf-8")
+
+            availability = resolve_runtime_availability(
+                Settings(
+                    platform_db_path=platform_db_path,
+                    market_state_snapshot_path=market_state_snapshot_path,
+                    orderbook_snapshot_path=orderbook_snapshot_path,
+                    liquidation_events_path=liquidation_events_path,
+                )
+            )
+
+        self.assertTrue(availability.has_platform_db_source)
+        self.assertTrue(availability.has_platform_bridge_source)
+        self.assertTrue(availability.has_liquidation_source)
+
+    def test_preflight_live_source_status_blocks_when_platform_db_source_missing(self) -> None:
+        status, reason = preflight_live_source_status(
+            RuntimeAvailability(
+                has_liquidation_source=True,
+                has_model_artifacts=True,
+                has_platform_db_source=False,
+                has_platform_bridge_source=True,
+            )
+        )
+
+        self.assertEqual(status, "blocked")
+        self.assertEqual(reason, "missing_platform_db_source")

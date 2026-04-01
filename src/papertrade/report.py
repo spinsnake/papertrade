@@ -78,3 +78,23 @@ class MarkdownReportWriter:
                 f"- closed_trades: `{len(closed_trades)}`",
             ]
         )
+
+    def write_summary(
+        self,
+        *,
+        run: PaperRun,
+        as_of_round: datetime,
+        open_positions: int,
+        closed_trades: list[PaperTrade],
+        report_type: str = "summary",
+    ) -> Path:
+        path = self.report_path(run=run, as_of_round=as_of_round, report_type=report_type)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = self.render_summary(
+            run=run,
+            as_of_round=as_of_round,
+            open_positions=open_positions,
+            closed_trades=closed_trades,
+        )
+        path.write_text(content, encoding="utf-8")
+        return path

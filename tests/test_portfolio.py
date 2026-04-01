@@ -10,17 +10,23 @@ from papertrade.portfolio import PortfolioSimulator
 from papertrade.scheduler import RoundScheduler
 
 
-def make_run() -> PaperRun:
+def make_run(
+    *,
+    initial_equity: Decimal = Decimal("100"),
+    notional_pct: Decimal = Decimal("0.01"),
+    fee_bps: Decimal = Decimal("4"),
+    slippage_bps: Decimal = Decimal("4"),
+) -> PaperRun:
     return PaperRun.new(
         run_id="paper-test",
         strategy="hybrid_aggressive_safe_valid",
         runtime_mode="forward_market_listener",
         report_output_dir="reports",
         report_filename_pattern="{strategy}__{run_id}__{as_of_round}__{report_type}.md",
-        initial_equity=Decimal("100"),
-        notional_pct=Decimal("0.01"),
-        fee_bps=Decimal("4"),
-        slippage_bps=Decimal("4"),
+        initial_equity=initial_equity,
+        notional_pct=notional_pct,
+        fee_bps=fee_bps,
+        slippage_bps=slippage_bps,
         decision_buffer_seconds=30,
         market_state_staleness_sec=120,
         orderbook_staleness_sec=15,
@@ -113,3 +119,96 @@ class PortfolioTests(unittest.TestCase):
         )
         self.assertIs(final_position.state, PositionState.SETTLEMENT_ERROR)
         self.assertEqual(final_position.close_reason, "settlement_error")
+
+    def test_settlement_rejects_round_before_entry(self) -> None:
+        simulator = PortfolioSimulator(run=make_run())
+        position = simulator.open_position(
+            decision=make_decision(),
+            entry_time=datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc),
+            planned_exit_round=datetime(2025, 1, 12, 0, 0, tzinfo=timezone.utc),
+        )
+
+        with self.assertRaisesRegex(ValueError, "funding_round must not be before entry_round"):
+            simulator.settle_round(
+                position_id=position.position_id,
+                funding_round=datetime(2025, 1, 11, 0, 0, tzinfo=timezone.utc),
+                bybit_funding_rate_bps=Decimal("5"),
+                bitget_funding_rate_bps=Decimal("2"),
+            )
+
+    def test_settlement_rejects_non_increasing_rounds(self) -> None:
+        simulator = PortfolioSimulator(run=make_run())
+        position = simulator.open_position(
+            decision=make_decision(),
+            entry_time=datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc),
+            planned_exit_round=datetime(2025, 1, 12, 0, 0, tzinfo=timezone.utc),
+        )
+
+        simulator.settle_round(
+            position_id=position.position_id,
+            funding_round=datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc),
+            bybit_funding_rate_bps=Decimal("5"),
+            bitget_funding_rate_bps=Decimal("2"),
+        )
+
+        with self.assertRaisesRegex(ValueError, "funding_round must be strictly increasing"):
+            simulator.settle_round(
+                position_id=position.position_id,
+                funding_round=datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc),
+                bybit_funding_rate_bps=Decimal("4"),
+                bitget_funding_rate_bps=Decimal("1"),
+            )
+
+    def test_settlement_rejects_round_after_planned_exit(self) -> None:
+        simulator = PortfolioSimulator(run=make_run())
+        position = simulator.open_position(
+            decision=make_decision(),
+            entry_time=datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc),
+            planned_exit_round=datetime(2025, 1, 12, 0, 0, tzinfo=timezone.utc),
+        )
+
+        with self.assertRaisesRegex(ValueError, "funding_round must not be after planned_exit_round"):
+            simulator.settle_round(
+                position_id=position.position_id,
+                funding_round=datetime(2025, 1, 12, 8, 0, tzinfo=timezone.utc),
+                bybit_funding_rate_bps=Decimal("5"),
+                bitget_funding_rate_bps=Decimal("2"),
+            )
+
+    def test_closing_loss_updates_max_drawdown_pct(self) -> None:
+        simulator = PortfolioSimulator(
+            run=make_run(
+                notional_pct=Decimal("1"),
+                fee_bps=Decimal("1000"),
+                slippage_bps=Decimal("0"),
+            )
+        )
+        scheduler = RoundScheduler()
+        position = simulator.open_position(
+            decision=make_decision(),
+            entry_time=datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc),
+            planned_exit_round=scheduler.exit_round(datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc)),
+        )
+
+        simulator.settle_round(
+            position_id=position.position_id,
+            funding_round=datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc),
+            bybit_funding_rate_bps=Decimal("0"),
+            bitget_funding_rate_bps=Decimal("0"),
+        )
+        simulator.settle_round(
+            position_id=position.position_id,
+            funding_round=datetime(2025, 1, 11, 16, 0, tzinfo=timezone.utc),
+            bybit_funding_rate_bps=Decimal("0"),
+            bitget_funding_rate_bps=Decimal("0"),
+        )
+        simulator.settle_round(
+            position_id=position.position_id,
+            funding_round=datetime(2025, 1, 12, 0, 0, tzinfo=timezone.utc),
+            bybit_funding_rate_bps=Decimal("0"),
+            bitget_funding_rate_bps=Decimal("0"),
+        )
+
+        self.assertEqual(simulator.run.current_equity, Decimal("90"))
+        self.assertEqual(simulator.run.peak_equity, Decimal("100"))
+        self.assertEqual(simulator.run.max_drawdown_pct, Decimal("10"))

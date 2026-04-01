@@ -7,7 +7,7 @@ from decimal import Decimal
 from .contracts import FundingRoundSnapshot, MarketState, Orderbook, Pair
 from .scheduler import FundingDecision
 from .sources.liquidation import LiquidationSource
-from .sources.platform_bridge import InMemoryPlatformBridge
+from .sources.platform_bridge import PlatformBridgeSource
 
 
 BPS_MULTIPLIER = Decimal("10000")
@@ -15,7 +15,7 @@ BPS_MULTIPLIER = Decimal("10000")
 
 @dataclass(frozen=True)
 class SnapshotCollector:
-    bridge: InMemoryPlatformBridge
+    bridge: PlatformBridgeSource
     liquidation_source: LiquidationSource | None = None
     market_state_staleness_seconds: int = 120
     orderbook_staleness_seconds: int = 15

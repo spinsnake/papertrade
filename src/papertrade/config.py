@@ -31,6 +31,10 @@ class Settings:
     strict_liquidation: bool = True
     risky_artifact_path: Path | None = None
     safe_artifact_path: Path | None = None
+    platform_db_path: Path | None = None
+    market_state_snapshot_path: Path | None = None
+    orderbook_snapshot_path: Path | None = None
+    liquidation_events_path: Path | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -53,6 +57,10 @@ class Settings:
             strict_liquidation=_env("PAPERTRADE_STRICT_LIQUIDATION", "true").lower() in {"1", "true", "yes"},
             risky_artifact_path=_path_or_none(_env("PAPERTRADE_RISKY_ARTIFACT_PATH", "")),
             safe_artifact_path=_path_or_none(_env("PAPERTRADE_SAFE_ARTIFACT_PATH", "")),
+            platform_db_path=_path_or_none(_env("PAPERTRADE_PLATFORM_DB_PATH", "")),
+            market_state_snapshot_path=_path_or_none(_env("PAPERTRADE_MARKET_STATE_SNAPSHOT_PATH", "")),
+            orderbook_snapshot_path=_path_or_none(_env("PAPERTRADE_ORDERBOOK_SNAPSHOT_PATH", "")),
+            liquidation_events_path=_path_or_none(_env("PAPERTRADE_LIQUIDATION_EVENTS_PATH", "")),
         )
         settings.validate()
         return settings
