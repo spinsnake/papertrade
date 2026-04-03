@@ -5,26 +5,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from .config import Settings
-from .enums import RunStatus
-from .contracts import Pair, PaperRun
-from .continuous_runtime import (
+from .data_management.config import Settings
+from .data_management.state_store import SQLiteStateStore
+from .execution.continuous_runtime import (
     ContinuousForwardRunner,
+    build_aligned_simulated_now_provider,
     build_real_now_provider,
     build_real_source_loader,
     build_simulated_now_provider,
     real_sleep,
 )
-from .portfolio import PortfolioSimulator
-from .runtime import preflight_live_source_status, preflight_status, resolve_runtime_availability
-from .single_cycle_runtime import (
+from .execution.runtime import preflight_live_source_status, preflight_status, resolve_runtime_availability
+from .execution.single_cycle_runtime import (
     build_run_artifact_writer,
     close_source_bundle,
     execute_single_cycle,
     load_configured_single_cycle_sources,
     load_single_cycle_fixture,
 )
-from .state_store import SQLiteStateStore
+from .trading_logic.contracts import Pair, PaperRun
+from .trading_logic.enums import RunStatus
+from .trading_logic.portfolio import PortfolioSimulator
 
 
 def _parse_pair(value: str) -> Pair:
@@ -153,10 +154,22 @@ def run_forward(
                     now_provider = build_real_now_provider()
                     sleep_fn = real_sleep
                 else:
-                    now_provider = build_simulated_now_provider(
-                        start_utc=now_utc,
-                        step_seconds=max(poll_seconds, 8 * 60 * 60),
-                    )
+                    step_seconds = max(poll_seconds, 8 * 60 * 60)
+                    if input_file is None:
+                        now_provider = build_aligned_simulated_now_provider(
+                            start_utc=now_utc,
+                            step_seconds=step_seconds,
+                            decision_buffer_seconds=settings.decision_buffer_seconds,
+                            evaluation_window_seconds=min(
+                                settings.market_state_staleness_seconds,
+                                settings.orderbook_staleness_seconds,
+                            ),
+                        )
+                    else:
+                        now_provider = build_simulated_now_provider(
+                            start_utc=now_utc,
+                            step_seconds=step_seconds,
+                        )
                     sleep_fn = lambda _: None
 
                 completed_cycles = runner.run_loop(

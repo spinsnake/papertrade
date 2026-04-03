@@ -22,15 +22,25 @@ Standalone forward paper trade runtime for the `hybrid_aggressive_safe_valid` st
 
 The default standalone deployment path does not require PostgreSQL.
 
+## Package Layout
+
+- trading logic: [src/papertrade/trading_logic](/d:/git/papertrade/src/papertrade/trading_logic)
+- data streaming: [src/papertrade/data_streaming](/d:/git/papertrade/src/papertrade/data_streaming)
+- execution: [src/papertrade/execution](/d:/git/papertrade/src/papertrade/execution)
+- data management: [src/papertrade/data_management](/d:/git/papertrade/src/papertrade/data_management)
+
+Compatibility shims still exist at the old `src/papertrade/*.py` paths so existing imports keep working during the transition.
+
 ## Main Files
 
-- config: [src/papertrade/config.py](/d:/git/papertrade/src/papertrade/config.py)
+- config: [src/papertrade/data_management/config.py](/d:/git/papertrade/src/papertrade/data_management/config.py)
 - CLI: [src/papertrade/cli.py](/d:/git/papertrade/src/papertrade/cli.py)
-- live runner: [src/papertrade/continuous_runtime.py](/d:/git/papertrade/src/papertrade/continuous_runtime.py)
-- cycle runtime: [src/papertrade/single_cycle_runtime.py](/d:/git/papertrade/src/papertrade/single_cycle_runtime.py)
-- SQLite market/history store: [src/papertrade/sources/platform_db.py](/d:/git/papertrade/src/papertrade/sources/platform_db.py)
-- SQLite snapshot store: [src/papertrade/sources/platform_snapshots.py](/d:/git/papertrade/src/papertrade/sources/platform_snapshots.py)
-- state store: [src/papertrade/state_store.py](/d:/git/papertrade/src/papertrade/state_store.py)
+- live runner: [src/papertrade/execution/continuous_runtime.py](/d:/git/papertrade/src/papertrade/execution/continuous_runtime.py)
+- cycle runtime: [src/papertrade/execution/single_cycle_runtime.py](/d:/git/papertrade/src/papertrade/execution/single_cycle_runtime.py)
+- snapshot collector: [src/papertrade/data_streaming/snapshot_collector.py](/d:/git/papertrade/src/papertrade/data_streaming/snapshot_collector.py)
+- SQLite market/history store: [src/papertrade/data_streaming/sources/platform_db.py](/d:/git/papertrade/src/papertrade/data_streaming/sources/platform_db.py)
+- SQLite snapshot store: [src/papertrade/data_streaming/sources/platform_snapshots.py](/d:/git/papertrade/src/papertrade/data_streaming/sources/platform_snapshots.py)
+- state store: [src/papertrade/data_management/state_store.py](/d:/git/papertrade/src/papertrade/data_management/state_store.py)
 
 ## Environment
 
@@ -168,7 +178,7 @@ Trade log column meanings:
 D:\git\papertrade\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Current result: `85` tests passing.
+Current result: `86` tests passing.
 
 ## Remaining Gaps
 

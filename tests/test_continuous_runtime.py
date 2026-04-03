@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -316,6 +317,74 @@ class ContinuousRuntimeTests(unittest.TestCase):
 
         self.assertIsNotNone(first_result)
         self.assertIsNone(duplicate_result)
+
+    def test_continuous_runner_waits_for_decision_window_before_processing_configured_sources(self) -> None:
+        risky_payload, safe_payload = make_artifact_payloads()
+        pair = Pair("BTC", "USDT")
+        early_time = datetime(2025, 1, 11, 23, 59, 5, tzinfo=timezone.utc)
+        ready_time = datetime(2025, 1, 11, 23, 59, 15, tzinfo=timezone.utc)
+        payload = make_fixture_payload(
+            now_utc="2025-01-11T23:59:05+00:00",
+            bybit_rate="0.0006",
+            bitget_rate="0.0001",
+            bybit_updated_at="2025-01-11T23:59:20+00:00",
+            bitget_updated_at="2025-01-11T23:59:20+00:00",
+            bybit_orderbook_updated_at="2025-01-11T23:59:25+00:00",
+            bitget_orderbook_updated_at="2025-01-11T23:59:25+00:00",
+            funding_history=[
+                {"exchange": "bybit", "time": "2025-01-11T16:00:00+00:00", "funding_rate": "0.0004"},
+                {"exchange": "bitget", "time": "2025-01-11T16:00:00+00:00", "funding_rate": "0.0001"},
+                {"exchange": "bybit", "time": "2025-01-11T08:00:00+00:00", "funding_rate": "0.0005"},
+                {"exchange": "bitget", "time": "2025-01-11T08:00:00+00:00", "funding_rate": "0.0002"},
+                {"exchange": "bybit", "time": "2025-01-11T00:00:00+00:00", "funding_rate": "0.0005"},
+                {"exchange": "bitget", "time": "2025-01-11T00:00:00+00:00", "funding_rate": "0.0002"},
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_dir = Path(tmpdir)
+            risky_path = base_dir / "risky.json"
+            safe_path = base_dir / "safe.json"
+            fixture_path = base_dir / "cycle.json"
+            risky_path.write_text(json.dumps(risky_payload), encoding="utf-8")
+            safe_path.write_text(json.dumps(safe_payload), encoding="utf-8")
+            fixture_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            settings = Settings(
+                report_output_dir=base_dir / "reports",
+                risky_artifact_path=risky_path,
+                safe_artifact_path=safe_path,
+            )
+            run = make_run(settings)
+            source_bundle = load_single_cycle_fixture(fixture_path)
+            now_values = iter((early_time, ready_time))
+            sleep_calls: list[float] = []
+            runner = ContinuousForwardRunner(
+                settings=settings,
+                run=run,
+                pair=pair,
+                source_loader=lambda now_utc: replace(
+                    source_bundle,
+                    now_utc=now_utc,
+                    enforce_decision_cutoff_window=True,
+                ),
+            )
+
+            completed_cycles = runner.run_loop(
+                max_cycles=1,
+                poll_seconds=30,
+                now_provider=lambda: next(now_values),
+                sleep_fn=sleep_calls.append,
+            )
+
+        self.assertEqual(completed_cycles, 1)
+        self.assertEqual(sleep_calls, [10.0])
+        self.assertIsNotNone(runner.last_result)
+        self.assertTrue(runner.last_result.cycle_result.decision.selected)
+        self.assertEqual(
+            runner.last_result.funding_decision.funding_round,
+            datetime(2025, 1, 12, 0, 0, tzinfo=timezone.utc),
+        )
 
     def test_continuous_runner_processes_multiple_pairs_in_one_loop(self) -> None:
         risky_payload, safe_payload = make_artifact_payloads()
