@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import unittest
 
-from papertrade.contracts import Funding, Pair
-from papertrade.history import FundingSpreadHistoryLoader
-from papertrade.sources.platform_db import InMemoryPlatformDBSource
+from papertrade.trading_logic.contracts import Funding, Pair
+from papertrade.trading_logic.history import FundingSpreadHistoryLoader
+from papertrade.data_streaming.sources.platform_db import InMemoryPlatformDBSource
 
 
 def make_funding(*, exchange: str, pair: Pair, time: datetime, rate: str) -> Funding:
@@ -125,3 +125,4 @@ class FundingSpreadHistoryLoaderTests(unittest.TestCase):
         self.assertEqual(history.matched_spreads_bps, (Decimal("2"),))
         self.assertEqual(history.lag1_abs_spread_bps, Decimal("2"))
         self.assertIsNone(history.rolling3_mean_abs_spread_bps)
+

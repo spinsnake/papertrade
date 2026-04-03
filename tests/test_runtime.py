@@ -5,8 +5,8 @@ import tempfile
 from unittest.mock import patch
 import unittest
 
-from papertrade.config import Settings
-from papertrade.runtime import (
+from papertrade.data_management.config import Settings
+from papertrade.execution.runtime import (
     RuntimeAvailability,
     preflight_live_source_status,
     preflight_status,
@@ -115,8 +115,8 @@ class RuntimeTests(unittest.TestCase):
             platform_postgres_dsn="postgres://platform",
         )
 
-        with patch("papertrade.runtime.PostgresPlatformDBSource.ping", return_value=None), patch(
-            "papertrade.runtime.PostgresFundingRoundSnapshotSource.ping",
+        with patch("papertrade.execution.runtime.PostgresPlatformDBSource.ping", return_value=None), patch(
+            "papertrade.execution.runtime.PostgresFundingRoundSnapshotSource.ping",
             return_value=None,
         ):
             availability = resolve_runtime_availability(settings)
@@ -139,3 +139,4 @@ class RuntimeTests(unittest.TestCase):
 
         self.assertEqual(status, "running")
         self.assertEqual(reason, "ok")
+

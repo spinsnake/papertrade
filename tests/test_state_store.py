@@ -7,9 +7,9 @@ import sqlite3
 import tempfile
 import unittest
 
-from papertrade.contracts import EntryDecision, PaperRun, Pair
-from papertrade.portfolio import PortfolioSimulator
-from papertrade.state_store import SQLiteStateStore
+from papertrade.trading_logic.contracts import EntryDecision, PaperRun, Pair
+from papertrade.trading_logic.portfolio import PortfolioSimulator
+from papertrade.data_management.state_store import SQLiteStateStore
 
 
 def make_run(report_dir: Path) -> PaperRun:
@@ -157,3 +157,4 @@ class SQLiteStateStoreTests(unittest.TestCase):
                     )
             finally:
                 connection.close()
+

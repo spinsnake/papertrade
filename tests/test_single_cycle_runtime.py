@@ -6,9 +6,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from papertrade.config import Settings
-from papertrade.contracts import PaperRun
-from papertrade.single_cycle_runtime import execute_single_cycle, load_single_cycle_fixture
+from papertrade.data_management.config import Settings
+from papertrade.trading_logic.contracts import PaperRun
+from papertrade.execution.single_cycle_runtime import execute_single_cycle, load_single_cycle_fixture
 
 
 def make_artifact_payloads() -> tuple[dict[str, object], dict[str, object]]:
@@ -192,3 +192,4 @@ class SingleCycleRuntimeTests(unittest.TestCase):
             cycle_payload["funding_decision"]["funding_round"],
             datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc).isoformat(),
         )
+

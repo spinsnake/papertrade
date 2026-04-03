@@ -7,14 +7,14 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from papertrade.config import Settings
-from papertrade.contracts import Pair
-from papertrade.runtime import resolve_runtime_availability
-from papertrade.single_cycle_runtime import load_configured_single_cycle_sources
-from papertrade.sources.liquidation import BybitLiveLiquidationSource
-from papertrade.sources.platform_bridge import LiveHttpPlatformBridge
-from papertrade.sources.platform_db import LivePlatformDBSource, SQLitePlatformDBSource
-from papertrade.sources.platform_snapshots import SQLiteFundingRoundSnapshotSource
+from papertrade.data_management.config import Settings
+from papertrade.trading_logic.contracts import Pair
+from papertrade.execution.runtime import resolve_runtime_availability
+from papertrade.execution.single_cycle_runtime import load_configured_single_cycle_sources
+from papertrade.data_streaming.sources.liquidation import BybitLiveLiquidationSource
+from papertrade.data_streaming.sources.platform_bridge import LiveHttpPlatformBridge
+from papertrade.data_streaming.sources.platform_db import LivePlatformDBSource, SQLitePlatformDBSource
+from papertrade.data_streaming.sources.platform_snapshots import SQLiteFundingRoundSnapshotSource
 
 
 class FakeHttpClient:
@@ -276,16 +276,16 @@ class LiveSourceAdapterTests(unittest.TestCase):
             )
 
             with patch(
-                "papertrade.sources.platform_db.ExchangeRestPlatformDBSource.get_instrument",
+                "papertrade.data_streaming.sources.platform_db.ExchangeRestPlatformDBSource.get_instrument",
                 side_effect=[
                     None,
                     None,
                 ],
             ), patch(
-                "papertrade.sources.platform_db.ExchangeRestPlatformDBSource.load_funding_history",
+                "papertrade.data_streaming.sources.platform_db.ExchangeRestPlatformDBSource.load_funding_history",
                 return_value=(),
             ), patch(
-                "papertrade.sources.platform_db.ExchangeRestPlatformDBSource.load_open_interest_history",
+                "papertrade.data_streaming.sources.platform_db.ExchangeRestPlatformDBSource.load_open_interest_history",
                 return_value=(),
             ):
                 availability = resolve_runtime_availability(settings)
@@ -302,3 +302,4 @@ class LiveSourceAdapterTests(unittest.TestCase):
         self.assertIsInstance(source_bundle.platform_db_source, SQLitePlatformDBSource)
         self.assertIsInstance(source_bundle.snapshot_store, SQLiteFundingRoundSnapshotSource)
         self.assertIsInstance(source_bundle.liquidation_source, BybitLiveLiquidationSource)
+

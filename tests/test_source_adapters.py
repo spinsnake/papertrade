@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import unittest
 
-from papertrade.contracts import Funding, Instrument, OpenInterest, Pair
-from papertrade.sources.liquidation import InMemoryLiquidationSource, LiquidationEvent
-from papertrade.sources.platform_db import InMemoryPlatformDBSource
+from papertrade.trading_logic.contracts import Funding, Instrument, OpenInterest, Pair
+from papertrade.data_streaming.sources.liquidation import InMemoryLiquidationSource, LiquidationEvent
+from papertrade.data_streaming.sources.platform_db import InMemoryPlatformDBSource
 
 
 def make_instrument(*, exchange: str, pair: Pair, funding_interval: int) -> Instrument:
@@ -149,3 +149,4 @@ class InMemoryLiquidationSourceTests(unittest.TestCase):
                 datetime(2025, 1, 1, 8, 0, tzinfo=timezone.utc),
                 datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc),
             )
+

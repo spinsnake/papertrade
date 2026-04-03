@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import unittest
 
-from papertrade.contracts import Level, MarketState, Orderbook, Pair
-from papertrade.scheduler import FundingDecision
-from papertrade.snapshot_collector import SnapshotCollector
-from papertrade.sources.platform_bridge import InMemoryPlatformBridge
+from papertrade.trading_logic.contracts import Level, MarketState, Orderbook, Pair
+from papertrade.trading_logic.scheduler import FundingDecision
+from papertrade.data_streaming.snapshot_collector import SnapshotCollector
+from papertrade.data_streaming.sources.platform_bridge import InMemoryPlatformBridge
 
 
 class FakeLiquidationSource:
@@ -225,3 +225,4 @@ class SnapshotCollectorTests(unittest.TestCase):
         self.assertEqual(bybit_snapshot.liquidation_amount_8h, Decimal("10"))
         self.assertEqual(bitget_snapshot.liquidation_amount_8h, Decimal("0"))
         self.assertTrue(bitget_snapshot.liquidation_complete)
+

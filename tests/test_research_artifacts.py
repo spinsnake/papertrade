@@ -6,9 +6,9 @@ from decimal import Decimal
 from pathlib import Path
 import unittest
 
-from papertrade.contracts import FeatureSnapshot, Pair
-from papertrade.rules import RuleEvaluator
-from papertrade.scoring import compute_scores, load_artifact_pair
+from papertrade.trading_logic.contracts import FeatureSnapshot, Pair
+from papertrade.trading_logic.rules import RuleEvaluator
+from papertrade.trading_logic.scoring import compute_scores, load_artifact_pair
 
 
 ARTIFACT_DIR = Path(__file__).resolve().parents[1] / "artifacts"
@@ -111,3 +111,4 @@ class ResearchArtifactTests(unittest.TestCase):
         self.assertEqual(decision.reason_code, "selected")
         self.assertEqual(decision.short_exchange, "bybit")
         self.assertEqual(decision.long_exchange, "bitget")
+

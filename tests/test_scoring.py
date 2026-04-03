@@ -7,8 +7,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from papertrade.contracts import FeatureSnapshot, Pair
-from papertrade.scoring import LogisticArtifact, compute_scores, load_artifact_pair
+from papertrade.trading_logic.contracts import FeatureSnapshot, Pair
+from papertrade.trading_logic.scoring import LogisticArtifact, compute_scores, load_artifact_pair
 
 
 class ScoringTests(unittest.TestCase):
@@ -145,3 +145,4 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(risky.threshold, Decimal("0.2"))
         self.assertEqual(safe.name, "safe")
         self.assertEqual(safe.threshold, Decimal("0.3"))
+

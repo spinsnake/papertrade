@@ -8,10 +8,10 @@ import sqlite3
 import tempfile
 import unittest
 
-from papertrade.contracts import Pair
-from papertrade.sources.liquidation import JsonFileLiquidationSource
-from papertrade.sources.platform_bridge import FilePlatformBridge
-from papertrade.sources.platform_db import SQLitePlatformDBSource
+from papertrade.trading_logic.contracts import Pair
+from papertrade.data_streaming.sources.liquidation import JsonFileLiquidationSource
+from papertrade.data_streaming.sources.platform_bridge import FilePlatformBridge
+from papertrade.data_streaming.sources.platform_db import SQLitePlatformDBSource
 
 
 def make_sqlite_db(path: Path) -> None:
@@ -226,3 +226,4 @@ class RealSourceAdapterTests(unittest.TestCase):
             )
 
         self.assertEqual(total, Decimal("25"))
+

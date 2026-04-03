@@ -5,16 +5,16 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import unittest
 
-from papertrade.contracts import FundingRoundSnapshot, Pair
-from papertrade.contracts import Funding
-from papertrade.orchestrator import (
+from papertrade.trading_logic.contracts import FundingRoundSnapshot, Pair
+from papertrade.trading_logic.contracts import Funding
+from papertrade.execution.orchestrator import (
     SingleCycleInput,
     build_artifact_backed_orchestrator,
     build_default_orchestrator,
     build_platform_db_backed_orchestrator,
 )
-from papertrade.scoring import LogisticArtifact
-from papertrade.sources.platform_db import InMemoryPlatformDBSource
+from papertrade.trading_logic.scoring import LogisticArtifact
+from papertrade.data_streaming.sources.platform_db import InMemoryPlatformDBSource
 
 
 def make_risky_artifact() -> LogisticArtifact:
@@ -440,3 +440,4 @@ class OrchestratorTests(unittest.TestCase):
 
         self.assertFalse(result.feature.entry_evaluable)
         self.assertEqual(result.feature.reason_code, "missing_lag_history")
+

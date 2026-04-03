@@ -7,9 +7,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from papertrade.contracts import PaperRun, PaperTrade, Pair
-from papertrade.persistence import CsvTradeLogWriter, JsonArtifactStore, RunArtifactWriter
-from papertrade.report import MarkdownReportWriter
+from papertrade.trading_logic.contracts import PaperRun, PaperTrade, Pair
+from papertrade.data_management.persistence import CsvTradeLogWriter, JsonArtifactStore, RunArtifactWriter
+from papertrade.data_management.report import MarkdownReportWriter
 
 
 def make_run() -> PaperRun:
@@ -155,3 +155,4 @@ class PersistenceTests(unittest.TestCase):
         self.assertIn("paper-test", summary_content)
         self.assertEqual(metadata["status"], "running")
         self.assertIn("trade-1", trade_log_content)
+

@@ -7,8 +7,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from papertrade.contracts import Pair
-from papertrade.sources.liquidation import BybitLiveLiquidationSource, LiquidationEvent
+from papertrade.trading_logic.contracts import Pair
+from papertrade.data_streaming.sources.liquidation import BybitLiveLiquidationSource, LiquidationEvent
 
 
 class LiveLiquidationSourceTests(unittest.TestCase):
@@ -113,3 +113,4 @@ class LiveLiquidationSourceTests(unittest.TestCase):
             )
 
             source.stop()
+

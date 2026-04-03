@@ -7,8 +7,8 @@ This checklist reflects the current state of `D:\git\papertrade` after switching
 ## 0. Architecture Split
 
 - [x] Split code into `trading_logic`, `data_streaming`, `execution`, and `data_management`
-- [x] Keep `src/papertrade/*.py` compatibility shims so old imports still work during the transition
-- [ ] Remove legacy shim imports after downstream code and docs stop depending on the old module paths
+- [x] Update internal imports, tests, and docs to use the new package layout
+- [x] Remove legacy `src/papertrade/*.py` and `src/papertrade/sources/*.py` shim modules
 
 ## 1. Scope
 
@@ -141,7 +141,6 @@ This checklist reflects the current state of `D:\git\papertrade` after switching
 - [ ] Liquidation completeness still depends on the Python websocket/cache
 - [ ] REST rate-limit behavior still needs operational verification for long-running deployment
 - [ ] Legacy PostgreSQL code paths still exist in the repo, even though the default live path no longer depends on them
-- [ ] Compatibility shims at old root module paths still need a cleanup pass once migration is complete
 
 ## 13. Definition Of Done
 
@@ -151,4 +150,3 @@ This checklist reflects the current state of `D:\git\papertrade` after switching
 - [x] Docker compose can run without PostgreSQL
 - [x] Tests cover the main parity and recovery paths
 - [ ] Live environment verification against real exchange endpoints still needs to be done
-- [ ] Old shim module paths are still present and not yet removed

@@ -6,8 +6,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from papertrade.contracts import PaperRun
-from papertrade.report import MarkdownReportWriter, format_as_of_round, render_report_filename
+from papertrade.trading_logic.contracts import PaperRun
+from papertrade.data_management.report import MarkdownReportWriter, format_as_of_round, render_report_filename
 
 
 class ReportNamingTests(unittest.TestCase):
@@ -56,3 +56,4 @@ class ReportNamingTests(unittest.TestCase):
             path.name,
             "hybrid_aggressive_safe_valid__paper-20260331-000000__20260331T080000Z__summary.md",
         )
+

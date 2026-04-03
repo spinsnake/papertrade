@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import unittest
 
-from papertrade.contracts import EntryDecision, Pair, PaperPosition, PaperRun
-from papertrade.enums import PositionState
-from papertrade.portfolio import PortfolioSimulator
-from papertrade.scheduler import RoundScheduler
+from papertrade.trading_logic.contracts import EntryDecision, Pair, PaperPosition, PaperRun
+from papertrade.trading_logic.enums import PositionState
+from papertrade.trading_logic.portfolio import PortfolioSimulator
+from papertrade.trading_logic.scheduler import RoundScheduler
 
 
 def make_run(
@@ -292,3 +292,4 @@ class PortfolioTests(unittest.TestCase):
         self.assertEqual(final_position.fee_bps, Decimal("23.0"))
         self.assertEqual(simulator.trades[0].bybit_fee_bps, Decimal("11.0"))
         self.assertEqual(simulator.trades[0].bitget_fee_bps, Decimal("12"))
+

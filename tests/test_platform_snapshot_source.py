@@ -6,8 +6,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from papertrade.contracts import FundingRoundSnapshot, Instrument, Pair
-from papertrade.sources.platform_snapshots import PostgresFundingRoundSnapshotSource, SQLiteFundingRoundSnapshotSource
+from papertrade.trading_logic.contracts import FundingRoundSnapshot, Instrument, Pair
+from papertrade.data_streaming.sources.platform_snapshots import PostgresFundingRoundSnapshotSource, SQLiteFundingRoundSnapshotSource
 
 
 class _FakeCursor:
@@ -175,3 +175,4 @@ class PlatformSnapshotSourceTests(unittest.TestCase):
         self.assertEqual(loaded.open_interest, Decimal("100.000"))
         self.assertEqual(loaded.liquidation_amount_8h, Decimal("12.5"))
         self.assertEqual(loaded.reason_code, "ok")
+

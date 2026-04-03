@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import unittest
 
-from papertrade.contracts import FeatureSnapshot, Pair
-from papertrade.rules import RuleEvaluator
-from papertrade.scoring import LogisticArtifact
+from papertrade.trading_logic.contracts import FeatureSnapshot, Pair
+from papertrade.trading_logic.rules import RuleEvaluator
+from papertrade.trading_logic.scoring import LogisticArtifact
 
 
 class RuleEvaluatorTests(unittest.TestCase):
@@ -82,3 +82,4 @@ class RuleEvaluatorTests(unittest.TestCase):
 
         self.assertFalse(decision.selected)
         self.assertEqual(decision.reason_code, "below_safe_threshold")
+

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import unittest
 
-from papertrade.scheduler import RoundScheduler
+from papertrade.trading_logic.scheduler import RoundScheduler
 
 
 class SchedulerTests(unittest.TestCase):
@@ -21,3 +21,4 @@ class SchedulerTests(unittest.TestCase):
         scheduler = RoundScheduler()
         exit_round = scheduler.exit_round(datetime(2025, 1, 11, 8, 0, tzinfo=timezone.utc))
         self.assertEqual(exit_round, datetime(2025, 1, 12, 0, 0, tzinfo=timezone.utc))
+

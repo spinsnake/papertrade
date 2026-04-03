@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import unittest
 
-from papertrade.contracts import EntryDecision, FundingRoundSnapshot, Instrument, Pair
-from papertrade.slippage import estimate_entry_slippage_bps, estimate_exit_slippage_bps
+from papertrade.trading_logic.contracts import EntryDecision, FundingRoundSnapshot, Instrument, Pair
+from papertrade.trading_logic.slippage import estimate_entry_slippage_bps, estimate_exit_slippage_bps
 
 
 def make_snapshot(*, exchange: str, pair: Pair) -> FundingRoundSnapshot:
@@ -124,8 +124,8 @@ class SlippageTests(unittest.TestCase):
         self.assertEqual(slippage_bps, Decimal("2"))
 
     def test_top_of_book_exit_slippage_respects_direction(self) -> None:
-        from papertrade.contracts import PaperPosition
-        from papertrade.enums import PositionState
+        from papertrade.trading_logic.contracts import PaperPosition
+        from papertrade.trading_logic.enums import PositionState
 
         pair = Pair("BTC", "USDT")
         bybit_snapshot = make_snapshot(exchange="bybit", pair=pair)
@@ -166,3 +166,4 @@ class SlippageTests(unittest.TestCase):
         )
 
         self.assertEqual(slippage_bps, Decimal("2.00000"))
+

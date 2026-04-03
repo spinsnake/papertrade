@@ -29,7 +29,7 @@ The default standalone deployment path does not require PostgreSQL.
 - execution: [src/papertrade/execution](/d:/git/papertrade/src/papertrade/execution)
 - data management: [src/papertrade/data_management](/d:/git/papertrade/src/papertrade/data_management)
 
-Compatibility shims still exist at the old `src/papertrade/*.py` paths so existing imports keep working during the transition.
+The old flat module paths under `src/papertrade/*.py` and `src/papertrade/sources/*.py` have been removed. Use the package paths above directly.
 
 ## Main Files
 
